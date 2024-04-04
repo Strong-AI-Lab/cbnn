@@ -4,9 +4,10 @@ from typing import Optional
 from ..trainer.losses import normal_kullback_leibler_divergence
 
 import torch
+import pytorch_lightning as pl
 
 
-class BaseVAE(torch.nn.module):
+class BaseVAE(pl.LightningModule):
 
     def __init__(self, *args, **kwargs):
         super(BaseVAE, self).__init__()
@@ -14,6 +15,7 @@ class BaseVAE(torch.nn.module):
         self.decoder = None
 
         self._init_modules(*args, **kwargs)
+        self.save_hyperparameters()
 
     def _init_modules(self):
         raise NotImplementedError()
@@ -47,6 +49,34 @@ class BaseVAE(torch.nn.module):
 
         loss = recons_loss + kld_weight * kld_loss
         return {'loss': loss, 'Reconstruction_Loss':recons_loss.detach(), 'KLD':-kld_loss.detach()}
+    
+
+    def training_step(self, batch, batch_idx):
+        x, y = batch
+        recon, _, mu, log_var = self(x)
+        losses = self.loss_function(x, recon, mu, log_var)
+        losses = {"train_" + k: v for k, v in losses.items()}
+        self.log_dict(losses)
+        return losses['loss']
+    
+    def validation_step(self, batch, batch_idx):
+        x, y = batch
+        recon, _, mu, log_var = self(x)
+        losses = self.loss_function(x, recon, mu, log_var)
+        losses = {"val_" + k: v for k, v in losses.items()}
+        self.log_dict(losses)
+        return losses['loss']
+    
+    def test_step(self, batch, batch_idx):
+        x, y = batch
+        recon, _, mu, log_var = self(x)
+        losses = self.loss_function(x, recon, mu, log_var)
+        losses = {"test_" + k: v for k, v in losses.items()}
+        self.log_dict(losses)
+        return losses['loss']
+    
+    def configure_optimizers(self):
+        return torch.optim.AdamW(self.parameters(), lr=1e-3)
     
 
 
