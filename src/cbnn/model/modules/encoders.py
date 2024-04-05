@@ -4,7 +4,7 @@ from typing import List
 import torch
 
 
-class CNNVariationalEncoder(torch.nn.module):
+class CNNVariationalEncoder(torch.nn.Module):
     """
     Modified from the vanilla VAE at https://github.com/AntixK/PyTorch-VAE
     """

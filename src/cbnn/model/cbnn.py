@@ -1,15 +1,13 @@
 
 from typing import Optional, List, NewType
 
+from .modules.encoders import CNNVariationalEncoder
+from .modules.decoders import CNNVariationalDecoder
+from .modules.classifiers import BayesianClassifier
 from ..trainer.losses import normal_kullback_leibler_divergence, gaussian_mutual_information
 
 import torch
 import pytorch_lightning as pl
-
-# Custom types
-VAEEncoder = torch.nn.Module
-VAEDecoder = torch.nn.Module
-BayesianClassifier = torch.nn.Module
 
 
 class CBNN(pl.LightningModule):
@@ -17,11 +15,7 @@ class CBNN(pl.LightningModule):
     Causal Bayesian Neural Network
     """
 
-    def __init__(self, 
-            context_encoder : VAEEncoder, 
-            context_decoder : VAEDecoder,
-            inference_encoder : VAEEncoder, 
-            inference_classifier : BayesianClassifier,
+    def __init__(self,
             z_samples : int = 1,
             w_samples : int = 1,
             nb_input_images : int = 1,
@@ -29,26 +23,51 @@ class CBNN(pl.LightningModule):
             kld_weight : float = 1.0,
             context_kld_weight : float = 1.0,
             ic_mi_weight : float = 1.0,
-            wc_mi_weight : float = 1.0
+            wc_mi_weight : float = 1.0,
+            **kwargs
             ):
         super(CBNN, self).__init__()
 
-        self.context_encoder = context_encoder
-        self.context_decoder = context_decoder
-        self.inference_encoder = inference_encoder
-        self.inference_classifier = inference_classifier
+        # Modules
+        self.context_encoder = None
+        self.context_decoder = None
+        self.inference_encoder = None
+        self.inference_classifier = None
 
+        # Sampling parameters
         self.z_samples = z_samples
         self.w_samples = w_samples
         self.nb_input_images = nb_input_images
 
+        # Loss weights
         self.recon_weight = recon_weight
         self.kld_weight = kld_weight
         self.context_kld_weight = context_kld_weight
         self.ic_mi_weight = ic_mi_weight
         self.wc_mi_weight = wc_mi_weight
 
-        self.save_hyperparameters(ignore='context_encoder,context_decoder,inference_encoder,inference_classifier')
+        self._init_modules(**kwargs)
+
+        self.save_hyperparameters()
+
+
+    def _init_modules(self,**kwargs):
+        raise NotImplementedError()
+
+    @classmethod
+    def add_model_specific_args(cls, parent_parser):
+        
+        parser = parent_parser.add_argument_group("CBNN")
+        parser.add_argument('--z_samples', type=int, default=1, help='Number of samples to draw from the inference encoder.')
+        parser.add_argument('--w_samples', type=int, default=1, help='Number of weight samples to draw from the meta inference classifier.')
+        parser.add_argument('--nb_input_images', type=int, default=1, help='Number of input images to the model.')
+        parser.add_argument('--recon_weight', type=float, default=1.0, help='Weight of the reconstruction loss.')
+        parser.add_argument('--kld_weight', type=float, default=1.0, help='Weight of the Kullback-Leibler divergence loss.')
+        parser.add_argument('--context_kld_weight', type=float, default=1.0, help='Weight of the context Kullback-Leibler divergence loss.')
+        parser.add_argument('--ic_mi_weight', type=float, default=1.0, help='Weight of the Inference-Context Mutual Information loss.')
+        parser.add_argument('--wc_mi_weight', type=float, default=1.0, help='Weight of the Weights-Context Mutual Information loss.')
+
+        return parent_parser
 
 
     def pre_load_context(self, x_context: List[torch.Tensor]):
@@ -234,3 +253,37 @@ class CBNN(pl.LightningModule):
     
     def configure_optimizers(self):
         return torch.optim.AdamW(self.parameters(), lr=1e-3)
+    
+
+
+
+class CNN_CBNN(CBNN):
+
+    def _init_modules(self,
+            in_channels: int = 3,
+            out_channels: int = 10,
+            latent_dim: int = 256,
+            encoder_hidden_dims: List = None, 
+            classifier_hidden_dim: int = 128, 
+            classifier_nb_layers: int = 3,
+            **kwargs):
+        
+        # Build modules
+        self.context_encoder = CNNVariationalEncoder(in_channels, latent_dim, encoder_hidden_dims)
+        self.context_decoder = CNNVariationalDecoder(latent_dim, in_channels, encoder_hidden_dims.reverse() if encoder_hidden_dims is not None else None)
+        self.inference_encoder = CNNVariationalEncoder(in_channels, latent_dim, encoder_hidden_dims)
+        self.inference_classifier = BayesianClassifier(2 * latent_dim, out_channels, classifier_hidden_dim, classifier_nb_layers)
+    
+    @classmethod
+    def add_model_specific_args(cls, parent_parser):
+        parent_parser = super(CNN_CBNN, cls).add_model_specific_args(parent_parser)
+
+        parser = parent_parser.add_argument_group("CNN_CBNN")
+        parser.add_argument('--in_channels', type=int, default=3, help='Number of input channels.')
+        parser.add_argument('--out_channels', type=int, default=10, help='Number of output channels.')
+        parser.add_argument('--latent_dim', type=int, default=256, help='Dimension of the latent space.')
+        parser.add_argument('--encoder_hidden_dims', type=int, nargs='+', default=[32, 64, 128, 256, 512], help='Hidden dimensions for the encoder.')
+        parser.add_argument('--classifier_hidden_dim', type=int, default=128, help='Hidden dimension for the classifier.')
+        parser.add_argument('--classifier_nb_layers', type=int, default=3, help='Number of layers for the classifier.')
+        
+        return parent_parser

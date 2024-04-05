@@ -1,7 +1,9 @@
 
-from typing import Optional
+from typing import List
 
 from ..trainer.losses import normal_kullback_leibler_divergence
+from .modules.encoders import CNNVariationalEncoder
+from .modules.decoders import CNNVariationalDecoder
 
 import torch
 import pytorch_lightning as pl
@@ -17,8 +19,14 @@ class BaseVAE(pl.LightningModule):
         self._init_modules(*args, **kwargs)
         self.save_hyperparameters()
 
-    def _init_modules(self):
+
+    def _init_modules(self,**kwargs):
         raise NotImplementedError()
+
+    @classmethod
+    def add_model_specific_args(cls, parent_parser):
+        return parent_parser
+    
 
     def encode(self, x : torch.Tensor):
         mu, log_var = self.encoder(x)
@@ -81,21 +89,35 @@ class BaseVAE(pl.LightningModule):
 
 
 
-class BaseVariationalBiasedAutoEncoder(BaseVAE):
+class CNNVAE(BaseVAE):
     """
-    Variational Context-Biased AutoEncoder
+    Modified from https://github.com/AntixK/PyTorch-VAE
     """
 
-    def decode(self, z: torch.Tensor, z_context: torch.Tensor):
-        z = torch.cat([z, z_context], dim=1)
-        return super().decode(z)
-
-    def forward(self, x: torch.Tensor, z_context: Optional[torch.Tensor] = None):
-        mu, log_var = self.encode(x)
-        z = self.sample(mu, log_var)
-
-        if z_context is None:
-            z_context = torch.randn_like(z)
+    def _init_modules(self,
+                 in_channels: int = 3,
+                 latent_dim: int = 256,
+                 hidden_dims: List = None,
+                 **kwargs) -> None:
         
-        x_recon = self.decode(z, z_context)
-        return [x_recon, x, mu, log_var]
+        self.latent_dim = latent_dim
+
+        # Build Encoder
+        self.encoder = CNNVariationalEncoder(in_channels, latent_dim, hidden_dims)
+
+        # Build Decoder
+        if hidden_dims is not None:
+            hidden_dims.reverse()
+            
+        self.decoder = CNNVariationalDecoder(latent_dim, in_channels, hidden_dims)
+
+    @classmethod
+    def add_model_specific_args(cls, parent_parser):
+        parent_parser = super(CNNVAE, cls).add_model_specific_args(parent_parser)
+
+        parser = parent_parser.add_argument_group("CNNVAE")
+        parser.add_argument('--in_channels', type=int, default=3, help='Number of input channels.')
+        parser.add_argument('--latent_dim', type=int, default=256, help='Dimension of latent space.')
+        parser.add_argument('--hidden_dims', type=int, nargs='+', default=[32, 64, 128, 256, 512], help='Hidden dimensions for encoder and decoder.')
+
+        return parent_parser
