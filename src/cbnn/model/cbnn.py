@@ -261,6 +261,7 @@ class CNN_CBNN(CBNN):
 
     def _init_modules(self,
             in_channels: int = 3,
+            image_dim: int = 64,
             out_channels: int = 10,
             latent_dim: int = 256,
             encoder_hidden_dims: List = None, 
@@ -269,9 +270,9 @@ class CNN_CBNN(CBNN):
             **kwargs):
         
         # Build modules
-        self.context_encoder = CNNVariationalEncoder(in_channels, latent_dim, encoder_hidden_dims)
-        self.context_decoder = CNNVariationalDecoder(latent_dim, in_channels, encoder_hidden_dims.reverse() if encoder_hidden_dims is not None else None)
-        self.inference_encoder = CNNVariationalEncoder(in_channels, latent_dim, encoder_hidden_dims)
+        self.context_encoder = CNNVariationalEncoder(in_channels, image_dim, latent_dim, encoder_hidden_dims)
+        self.context_decoder = CNNVariationalDecoder(latent_dim, in_channels, image_dim, encoder_hidden_dims.reverse() if encoder_hidden_dims is not None else None)
+        self.inference_encoder = CNNVariationalEncoder(in_channels, image_dim, latent_dim, encoder_hidden_dims)
         self.inference_classifier = BayesianClassifier(2 * latent_dim, out_channels, classifier_hidden_dim, classifier_nb_layers)
     
     @classmethod
@@ -280,6 +281,7 @@ class CNN_CBNN(CBNN):
 
         parser = parent_parser.add_argument_group("CNN_CBNN")
         parser.add_argument('--in_channels', type=int, default=3, help='Number of input channels.')
+        parser.add_argument('--image_dim', type=int, default=64, help='Dimension of the input image. Image is assumed to be square.')
         parser.add_argument('--out_channels', type=int, default=10, help='Number of output channels.')
         parser.add_argument('--latent_dim', type=int, default=256, help='Dimension of the latent space.')
         parser.add_argument('--encoder_hidden_dims', type=int, nargs='+', default=[32, 64, 128, 256, 512], help='Hidden dimensions for the encoder.')

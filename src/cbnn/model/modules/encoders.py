@@ -1,5 +1,5 @@
 
-from typing import List
+from typing import Optional, List
 
 import torch
 
@@ -11,8 +11,9 @@ class CNNVariationalEncoder(torch.nn.Module):
 
     def __init__(self,
                  in_channels: int,
+                 image_dim: int,
                  latent_dim: int,
-                 hidden_dims: List = None,
+                 hidden_dims: Optional[List] = None,
                  **kwargs) -> None:
         super(CNNVariationalEncoder, self).__init__()
 
@@ -21,6 +22,8 @@ class CNNVariationalEncoder(torch.nn.Module):
         modules = []
         if hidden_dims is None:
             hidden_dims = [32, 64, 128, 256, 512]
+            
+        self.reduced_dims = image_dim // 2**len(hidden_dims)
 
         # Build Encoder
         for h_dim in hidden_dims:
@@ -34,8 +37,8 @@ class CNNVariationalEncoder(torch.nn.Module):
             in_channels = h_dim
 
         self.encoder = torch.nn.Sequential(*modules)
-        self.fc_mu = torch.nn.Linear(hidden_dims[-1]*4, latent_dim)
-        self.fc_var = torch.nn.Linear(hidden_dims[-1]*4, latent_dim)        
+        self.fc_mu = torch.nn.Linear(hidden_dims[-1]*self.reduced_dims, latent_dim)
+        self.fc_var = torch.nn.Linear(hidden_dims[-1]*self.reduced_dims, latent_dim)        
 
 
     def forward(self, x: torch.Tensor):

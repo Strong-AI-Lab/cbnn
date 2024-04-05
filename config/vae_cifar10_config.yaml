@@ -5,9 +5,11 @@ amp_level: null
 auto_lr_find: false
 auto_scale_batch_size: false
 auto_select_gpus: null
+batch_size: 32
 benchmark: null
 check_val_every_n_epoch: 1
-data: MNIST
+data: CIFAR10
+data_dir: ./data/CIFAR-10/
 default_root_dir: null
 detect_anomaly: false
 devices: null
@@ -24,7 +26,7 @@ hidden_dims:
 - 128
 - 256
 - 512
-in_channels: 1
+in_channels: 3
 image_dim: 32
 inference_mode: true
 ipus: null
@@ -47,6 +49,7 @@ multiple_trainloader_mode: max_size_cycle
 num_nodes: 1
 num_processes: null
 num_sanity_val_steps: 2
+num_workers: 4
 overfit_batches: 0.0
 plugins: null
 precision: 32
@@ -62,5 +65,6 @@ tpu_cores: null
 track_grad_norm: -1
 train: false
 train_and_test: false
+train_val_split: 0.2
 val_check_interval: null
 wandb_project: null

@@ -12,6 +12,7 @@ class CNNVariationalDecoder(torch.nn.Module):
     def __init__(self,
                  latent_dim: int,
                  in_channels: int,
+                 image_dim: int,
                  hidden_dims: List = None,
                  **kwargs) -> None:
         super(CNNVariationalDecoder, self).__init__()
@@ -22,10 +23,13 @@ class CNNVariationalDecoder(torch.nn.Module):
         if hidden_dims is None:
             hidden_dims = [512, 256, 128, 64, 32]
 
+        self.reduced_dims = image_dim // 2**len(hidden_dims)
+        self.hidden_dims = hidden_dims
+
         # Build Decoder
         modules = []
 
-        self.decoder_input = torch.nn.Linear(latent_dim, hidden_dims[0] * 4)
+        self.decoder_input = torch.nn.Linear(latent_dim, self.hidden_dims[0] * self.reduced_dims)
 
         for i in range(len(hidden_dims) - 1):
             modules.append(
@@ -58,7 +62,8 @@ class CNNVariationalDecoder(torch.nn.Module):
 
     def forward(self, z: torch.Tensor):
         result = self.decoder_input(z)
-        result = result.view(-1, 512, 2, 2)
+        result = result.view(-1, self.hidden_dims[0], self.reduced_dims, self.reduced_dims)
         result = self.decoder(result)
         result = self.final_layer(result)
+        
         return result

@@ -2,22 +2,24 @@
 import argparse
 import yaml
 
-from src.cbnn.data.datasets import DATASETS
-from src.cbnn.model.models import get_model, add_model_specific_args
+from src.cbnn.data.datasets import DATASETS, BaseDataModule, get_dataset
+from src.cbnn.model.models import MODELS, get_model, add_model_specific_args
 
 import pytorch_lightning as pl
 from pytorch_lightning.loggers import WandbLogger
 
 
 def parse_args():
-    parser = argparse.ArgumentParser(description='Train and test a model or load existing model for inference.')
+    parser = argparse.ArgumentParser(description=f'Train and test a model or load existing model for inference. Available models: {", ".join(MODELS.keys())}')
 
     # Add arguments
     parser.add_argument('--data', type=str, default='MNIST', help=f'Dataset to use for training. Options: {", ".join(DATASETS.keys())}')
     parser.add_argument('--save', type=str, default=None, help='Path to saved model to load for inference. If None, train a new model from scratch.')
     parser.add_argument('--wandb_project', type=str, default=None, help='If specified, logs the run to wandb under the specified project.')
-    parser.add_argument('--load_config', type=str, default=None, help='Path to a yaml config file to load arguments from. Arugments provided in the command line will override the config file.')
-    parser.add_argument('--save_config', type=str, default=None, help='Path to save the current arguments to a config file.')
+
+    group = parser.add_argument_group()
+    group.add_argument('--load_config', type=str, default=None, help='Path to a yaml config file to load arguments from. No arguments should be provided in the command line.')
+    group.add_argument('--save_config', type=str, default=None, help='Path to save the current arguments to a config file.')
 
     # Add mutually exclusive group for training, testing, or both
     group = parser.add_mutually_exclusive_group()
@@ -28,17 +30,18 @@ def parse_args():
     # Add PyTorch Lightning Trainer arguments an model specific arguments
     parser = pl.Trainer.add_argparse_args(parser)
     parser = add_model_specific_args(parser)
+    parser = BaseDataModule.add_data_specific_args(parser)
 
     args = parser.parse_args()
 
-    # If load_config is specified, load the config file and update the arguments
+    # If load_config is specified, load the config file and ignore all other arguments
     if args.load_config is not None:
         with open(args.load_config, 'r') as f:
             config = yaml.safe_load(f)
-            args = argparse.Namespace(**config, **vars(args))
+            args = argparse.Namespace(**config)
 
     # If save_config is specified, save the current arguments to a config file
-    if args.save_config is not None:
+    elif args.save_config is not None:
         args_dict = vars(args)
         save_file = args_dict.pop('save_config') # do not keep the save_config argument in the saved config file to avoid overriding it when loading
         with open(save_file, 'w') as f:
@@ -62,8 +65,8 @@ def main():
         model.load_from_checkpoint(args.save)
 
 
-    # Load data
-    train_set, validation_set, test_set = DATASETS[args.data]()
+    # Load data (train, val, and test sets are loaded upon calling fit or test methods in the trainer)
+    data = get_dataset(args.data, **vars(args))
 
     
     # Build trainer
@@ -79,10 +82,10 @@ def main():
     is_test = not args.train
 
     if is_train:
-        trainer.fit(model, train_set, validation_set)
+        trainer.fit(model, data)
 
     if is_test:
-        trainer.test(model, test_set)
+        trainer.test(model, data)
 
 
 

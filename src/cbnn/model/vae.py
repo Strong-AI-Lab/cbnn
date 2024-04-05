@@ -96,6 +96,7 @@ class CNNVAE(BaseVAE):
 
     def _init_modules(self,
                  in_channels: int = 3,
+                 image_dim: int = 64,
                  latent_dim: int = 256,
                  hidden_dims: List = None,
                  **kwargs) -> None:
@@ -103,13 +104,13 @@ class CNNVAE(BaseVAE):
         self.latent_dim = latent_dim
 
         # Build Encoder
-        self.encoder = CNNVariationalEncoder(in_channels, latent_dim, hidden_dims)
+        self.encoder = CNNVariationalEncoder(in_channels, image_dim, latent_dim, hidden_dims)
 
         # Build Decoder
         if hidden_dims is not None:
             hidden_dims.reverse()
             
-        self.decoder = CNNVariationalDecoder(latent_dim, in_channels, hidden_dims)
+        self.decoder = CNNVariationalDecoder(latent_dim, in_channels, image_dim, hidden_dims)
 
     @classmethod
     def add_model_specific_args(cls, parent_parser):
@@ -117,6 +118,7 @@ class CNNVAE(BaseVAE):
 
         parser = parent_parser.add_argument_group("CNNVAE")
         parser.add_argument('--in_channels', type=int, default=3, help='Number of input channels.')
+        parser.add_argument('--image_dim', type=int, default=64, help='Dimension of the input image. Image is assumed to be square.')
         parser.add_argument('--latent_dim', type=int, default=256, help='Dimension of latent space.')
         parser.add_argument('--hidden_dims', type=int, nargs='+', default=[32, 64, 128, 256, 512], help='Hidden dimensions for encoder and decoder.')
 
