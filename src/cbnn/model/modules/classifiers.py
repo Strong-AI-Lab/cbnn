@@ -25,14 +25,14 @@ class MLPClassifier(torch.nn.Module):
             self.fc_hidden.append(torch.nn.Linear(hidden_dim, hidden_dim))
 
 
-    def forward(self, z: torch.Tensor):
-        z = torch.nn.functional.leaky_relu(self.fc_in(z))
+    def forward(self, x: torch.Tensor):
+        x = torch.nn.functional.leaky_relu(self.fc_in(x))
 
         for i in range(self.num_layers):
-            z = torch.nn.functional.leaky_relu(self.fc_hidden[i](z)) + z
+            x = torch.nn.functional.leaky_relu(self.fc_hidden[i](x)) + x
 
-        z = self.fc_out(z)
-        return z
+        x = self.fc_out(x)
+        return x
     
 
 
@@ -75,14 +75,14 @@ class BayesianClassifier(torch.nn.Module):
         return mean + eps * std
 
 
-    def forward(self, z: torch.Tensor, eps_in: Optional[torch.Tensor] = None, eps_out: Optional[torch.Tensor] = None):
+    def forward(self, x: torch.Tensor, eps_in: Optional[torch.Tensor] = None, eps_out: Optional[torch.Tensor] = None):
         fc_in_weights = self._sample_weights(self.fc_in_mean.weight, self.fc_in_log_var.weight, eps_in)
         fc_out_weights = self._sample_weights(self.fc_out_mean.weight, self.fc_out_log_var.weight, eps_out)
 
-        z = torch.nn.functional.leaky_relu(z @ fc_in_weights)
+        x = torch.nn.functional.leaky_relu(x @ fc_in_weights)
 
         for i in range(self.num_layers):
-            z = torch.nn.functional.leaky_relu(self.fc_hidden[i](z)) + z
+            x = torch.nn.functional.leaky_relu(self.fc_hidden[i](x)) + x
 
-        z = z @ fc_out_weights
-        return [z, fc_in_weights, fc_out_weights]
+        x = x @ fc_out_weights
+        return [x, fc_in_weights, fc_out_weights]

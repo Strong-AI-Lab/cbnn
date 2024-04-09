@@ -1,11 +1,12 @@
 
 from .cbnn import CNN_CBNN
-from .vae import CNNVAE
+from .vae import CNNVAE, CNNVAEClassifier
 
 
 MODELS = {
     'cbnn': CNN_CBNN,
-    'vae': CNNVAE
+    'vae': CNNVAE,
+    'vae_classifier': CNNVAEClassifier
 }
 
 def add_model_specific_args(parent_parser):

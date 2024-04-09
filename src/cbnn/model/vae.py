@@ -5,6 +5,7 @@ from typing import List
 from ..trainer.losses import normal_kullback_leibler_divergence
 from .modules.encoders import CNNVariationalEncoder
 from .modules.decoders import CNNVariationalDecoder
+from .modules.classifiers import MLPClassifier
 
 import torch
 import pytorch_lightning as pl
@@ -170,3 +171,83 @@ class CNNVAE(BaseVAE):
         parser.add_argument('--hidden_dims', type=int, nargs='+', default=[32, 64, 128, 256, 512], help='Hidden dimensions for encoder and decoder.')
 
         return parent_parser
+    
+
+
+class CNNVAEClassifier(CNNVAE):
+
+    def _init_modules(self, 
+                 in_channels: int = 3,
+                 image_dim: int = 64,
+                 latent_dim: int = 256,
+                 hidden_dims: List = None,
+                 num_classes: int = 10,
+                 num_inference_layers: int = 3,
+                 inference_weight: float = 1.0,
+                 **kwargs):
+        super()._init_modules(in_channels, image_dim, latent_dim, hidden_dims, **kwargs)
+
+        self.inference_weight = inference_weight
+
+        # Build Classifier
+        self.classifier = MLPClassifier(latent_dim, num_classes, latent_dim, num_inference_layers)
+
+    @classmethod
+    def add_model_specific_args(cls, parent_parser):
+        parent_parser = super(CNNVAEClassifier, cls).add_model_specific_args(parent_parser)
+
+        parser = parent_parser.add_argument_group("CNNVarClassifier")
+        parser.add_argument('--num_classes', type=int, default=10, help='Number of classes in the dataset.')
+        parser.add_argument('--num_inference_layers', type=int, default=3, help='Number of layers in the inference network.')
+        parser.add_argument('--inference_weight', type=float, default=1.0, help='Weight for inference loss.')
+
+        return parent_parser
+
+    def classify(self, z : torch.Tensor):
+        return self.classifier(z)
+
+    def forward(self, x: torch.Tensor):
+        mu, log_var = self.encode(x)
+        z = self.sample(mu, log_var)
+        return [self.decode(z), self.classify(z), x, mu, log_var]
+    
+    def accuracy(self, y : torch.Tensor, y_recon : torch.Tensor):
+        return torch.sum(y == torch.argmax(y_recon, dim=1)).float() / y.size(0)
+    
+    def loss_function(self, x : torch.Tensor, x_recon : torch.Tensor, y : torch.Tensor, y_recon : torch.Tensor, mu : torch.Tensor, log_var : torch.Tensor, **kwargs):
+        loss = super().loss_function(x, x_recon, mu, log_var, **kwargs)
+
+        inference_weight = kwargs['inference_weight'] if 'inference_weight' in kwargs else self.inference_weight
+
+        inference_loss = torch.nn.functional.cross_entropy(y_recon, y)
+        acc = self.accuracy(y, y_recon)
+
+        loss["loss"] = loss["loss"] + inference_weight * inference_loss
+        loss["Inference_Loss"] = inference_loss.detach()
+        loss["Accuracy"] = acc.detach()
+        return loss
+    
+
+    def training_step(self, batch, batch_idx):
+        x, y = batch
+        x_recon, y_recon, _, mu, log_var = self(x)
+        losses = self.loss_function(x, x_recon, y, y_recon, mu, log_var)
+        losses = {"train_" + k: v for k, v in losses.items()}
+        self.log_dict(losses)
+        return losses['train_loss']
+    
+    def validation_step(self, batch, batch_idx):
+        x, y = batch
+        x_recon, y_recon, _, mu, log_var = self(x)
+        losses = self.loss_function(x, x_recon, y, y_recon, mu, log_var)
+        losses = {"val_" + k: v for k, v in losses.items()}
+        self.log_dict(losses)
+        return losses['val_loss']
+    
+    def test_step(self, batch, batch_idx):
+        x, y = batch
+        x_recon, y_recon, _, mu, log_var = self(x)
+        losses = self.loss_function(x, x_recon, y, y_recon, mu, log_var)
+        losses = {"test_" + k: v for k, v in losses.items()}
+        self.log_dict(losses)
+        return losses['test_loss']
