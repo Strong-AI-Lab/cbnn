@@ -8,7 +8,7 @@ auto_select_gpus: null
 batch_size: 32
 benchmark: null
 check_val_every_n_epoch: 1
-data: CIFAR10
+data: MNIST
 data_dir: ./data/
 default_root_dir: null
 detect_anomaly: false
@@ -27,8 +27,9 @@ hidden_dims:
 - 256
 - 512
 image_dim: 32
-in_channels: 3
+in_channels: 1
 inference_mode: true
+inference_weight: 0.6
 ipus: null
 kld_weight: 0.00025
 latent_dim: 64
@@ -45,9 +46,11 @@ max_steps: -1
 max_time: null
 min_epochs: null
 min_steps: null
-model: vae
+model: vae_classifier
 move_metrics_to_cpu: false
 multiple_trainloader_mode: max_size_cycle
+num_classes: 10
+num_inference_layers: 1
 num_nodes: 1
 num_processes: null
 num_sanity_val_steps: 2

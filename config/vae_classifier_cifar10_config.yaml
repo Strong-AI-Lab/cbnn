@@ -29,9 +29,10 @@ hidden_dims:
 image_dim: 32
 in_channels: 3
 inference_mode: true
+inference_weight: 0.4
 ipus: null
-kld_weight: 0.00025
-latent_dim: 64
+kld_weight: 2.5e-05
+latent_dim: 256
 learning_rate: 0.005
 limit_predict_batches: null
 limit_test_batches: null
@@ -45,9 +46,11 @@ max_steps: -1
 max_time: null
 min_epochs: null
 min_steps: null
-model: vae
+model: vae_classifier
 move_metrics_to_cpu: false
 multiple_trainloader_mode: max_size_cycle
+num_classes: 10
+num_inference_layers: 3
 num_nodes: 1
 num_processes: null
 num_sanity_val_steps: 2
