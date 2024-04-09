@@ -17,7 +17,7 @@ class BaseVAE(pl.LightningModule):
     Modified from https://github.com/AntixK/PyTorch-VAE
     """
 
-    def __init__(self, kld_weight: float = 0.00025, learning_rate : float = 0.005, weight_decay : float = 0.0, *args, **kwargs):
+    def __init__(self, kld_weight: float = 0.00025, learning_rate : float = 0.005, weight_decay : float = 0.0, **kwargs):
         super(BaseVAE, self).__init__()
         self.encoder = None
         self.decoder = None
@@ -26,7 +26,7 @@ class BaseVAE(pl.LightningModule):
         self.learning_rate = learning_rate
         self.weight_decay = weight_decay
 
-        self._init_modules(*args, **kwargs)
+        self._init_modules(**kwargs)
         self.save_hyperparameters()
 
 
@@ -71,7 +71,16 @@ class BaseVAE(pl.LightningModule):
             test_input = test_input.to(device)
             test_label = test_label.to(device)
 
-            # test_input, test_label = batch
+            # Save input images
+            os.makedirs(os.path.join(self.logger.log_dir, "Input_Images"), exist_ok=True)
+            vutils.save_image(test_input.data,
+                            os.path.join(self.logger.log_dir, 
+                                        "Input_Images", 
+                                        f"input_{self.logger.name}_Epoch_{self.current_epoch}.png"),
+                            normalize=True,
+                            nrow=12)
+
+            # Generate reconstruction images
             recons = self.generate(test_input)
             os.makedirs(os.path.join(self.logger.log_dir, "Reconstructions"), exist_ok=True)
             vutils.save_image(recons.data,
