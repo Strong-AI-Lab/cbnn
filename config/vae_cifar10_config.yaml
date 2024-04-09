@@ -30,6 +30,7 @@ in_channels: 3
 image_dim: 32
 inference_mode: true
 ipus: null
+kld_weight: 1.0
 latent_dim: 256
 limit_predict_batches: null
 limit_test_batches: null

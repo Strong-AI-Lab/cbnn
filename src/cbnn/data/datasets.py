@@ -16,6 +16,9 @@ class BaseDataModule(pl.LightningDataModule):
         self.batch_size = batch_size
         self.num_workers = num_workers
         self.train_val_split = train_val_split
+        self.test_data = []
+        self.train_data = []
+        self.val_data = []
 
     def _split_train_val_data(self, data):
         train, val = data_utils.random_split(data, [int(len(data) * (1 - self.train_val_split)), int(len(data) * self.train_val_split)])

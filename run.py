@@ -73,7 +73,7 @@ def main():
     pl.seed_everything(42, workers=True)
     trainer = pl.Trainer.from_argparse_args(
         args,
-        logger=WandbLogger(name=f"{args.model}_train", project=args.wandb_project) if args.wandb_project else None
+        logger=WandbLogger(name=f"{args.model}_train", project=args.wandb_project) if args.wandb_project else True
     )
 
 

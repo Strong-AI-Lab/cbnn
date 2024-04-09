@@ -173,12 +173,12 @@ class CBNN(pl.LightningModule):
         wc_mi_weight = kwargs['wc_mi_weight'] if 'wc_mi_weight' in kwargs else self.wc_mi_weight
         
         # Main inference loss
-        infer_loss = torch.nn.functional.cross_entropy(y_recon, y_target, reduction='sum')
+        infer_loss = torch.nn.functional.cross_entropy(y_recon, y_target)
 
         # Context reconstruction loss
         recons_loss = 0.0
         for x_recon in x_recons:
-            recons_loss += torch.nn.functional.mse_loss(x_recon, x, reduction='sum')
+            recons_loss += torch.nn.functional.mse_loss(x_recon, x)
         recons_loss /= len(x_recons)
 
         # Context Encoder Kullback-Leibler divergence loss
@@ -221,7 +221,7 @@ class CBNN(pl.LightningModule):
         losses = self.loss_function(x, x_recons, y, y_recon, *outputs)
         losses = {"train_" + k: v for k, v in losses.items()}
         self.log_dict(losses)
-        return losses['loss']
+        return losses['train_loss']
     
     def validation_step(self, batch, batch_idx):
         if self.loaded_context:
@@ -235,7 +235,7 @@ class CBNN(pl.LightningModule):
         losses = self.loss_function(x, x_recons, y, y_recon, *outputs)
         losses = {"val_" + k: v for k, v in losses.items()}
         self.log_dict(losses)
-        return losses['loss']
+        return losses['val_loss']
     
     def test_step(self, batch, batch_idx):
         if self.loaded_context:
@@ -249,7 +249,7 @@ class CBNN(pl.LightningModule):
         losses = self.loss_function(x, x_recons, y, y_recon, *outputs)
         losses = {"test_" + k: v for k, v in losses.items()}
         self.log_dict(losses)
-        return losses['loss']
+        return losses['test_loss']
     
     def configure_optimizers(self):
         return torch.optim.AdamW(self.parameters(), lr=1e-3)

@@ -1,4 +1,5 @@
 
+import os
 from typing import List
 
 from ..trainer.losses import normal_kullback_leibler_divergence
@@ -7,14 +8,22 @@ from .modules.decoders import CNNVariationalDecoder
 
 import torch
 import pytorch_lightning as pl
+import torchvision.utils as vutils
 
 
 class BaseVAE(pl.LightningModule):
+    """
+    Modified from https://github.com/AntixK/PyTorch-VAE
+    """
 
-    def __init__(self, *args, **kwargs):
+    def __init__(self, kld_weight: float = 0.00025, learning_rate : float = 0.005, weight_decay : float = 0.0, *args, **kwargs):
         super(BaseVAE, self).__init__()
         self.encoder = None
         self.decoder = None
+
+        self.kld_weight = kld_weight
+        self.learning_rate = learning_rate
+        self.weight_decay = weight_decay
 
         self._init_modules(*args, **kwargs)
         self.save_hyperparameters()
@@ -25,6 +34,10 @@ class BaseVAE(pl.LightningModule):
 
     @classmethod
     def add_model_specific_args(cls, parent_parser):
+        parser = parent_parser.add_argument_group("VAE")
+        parser.add_argument('--kld_weight', type=float, default=0.00025, help='Weight for KLD loss.')
+        parser.add_argument('--learning_rate', type=float, default=0.005, help='Learning rate for the optimizer.')
+        parser.add_argument('--weight_decay', type=float, default=0.0, help='Weight decay for the optimizer.')
         return parent_parser
     
 
@@ -49,10 +62,41 @@ class BaseVAE(pl.LightningModule):
     def generate(self, x : torch.Tensor):
         return self.forward(x)[0]
     
-    def loss_function(self, x : torch.Tensor, x_recon : torch.Tensor, mu : torch.Tensor, log_var : torch.Tensor, **kwargs):
-        kld_weight = kwargs['M_N']
+    def sample_images(self, num_samples: int = 64):
+        try:
+            device = next(self.parameters()).device
+            # Get sample reconstruction image            
+            test_input, test_label = next(iter(self.trainer.datamodule.val_dataloader()))
+            test_input = test_input.to(device)
+            test_label = test_label.to(device)
 
-        recons_loss = torch.nn.functional.mse_loss(x_recon, x, reduction='sum')
+            # test_input, test_label = batch
+            recons = self.generate(test_input)
+            os.makedirs(os.path.join(self.logger.log_dir, "Reconstructions"), exist_ok=True)
+            vutils.save_image(recons.data,
+                            os.path.join(self.logger.log_dir, 
+                                        "Reconstructions", 
+                                        f"recons_{self.logger.name}_Epoch_{self.current_epoch}.png"),
+                            normalize=True,
+                            nrow=12)
+        
+            # Generate samples
+            samples = self.decode(torch.randn(num_samples,self.latent_dim).to(device))
+            os.makedirs(os.path.join(self.logger.log_dir, "Samples"), exist_ok=True)
+            vutils.save_image(samples.cpu().data,
+                            os.path.join(self.logger.log_dir, 
+                                        "Samples",      
+                                        f"{self.logger.name}_Epoch_{self.current_epoch}.png"),
+                            normalize=True,
+                            nrow=12)
+        
+        except StopIteration:
+            pass
+    
+    def loss_function(self, x : torch.Tensor, x_recon : torch.Tensor, mu : torch.Tensor, log_var : torch.Tensor, **kwargs):
+        kld_weight = kwargs['kld_weight'] if 'kld_weight' in kwargs else self.kld_weight
+
+        recons_loss = torch.nn.functional.mse_loss(x_recon, x)
         kld_loss = normal_kullback_leibler_divergence(mu, log_var)
 
         loss = recons_loss + kld_weight * kld_loss
@@ -65,7 +109,7 @@ class BaseVAE(pl.LightningModule):
         losses = self.loss_function(x, recon, mu, log_var)
         losses = {"train_" + k: v for k, v in losses.items()}
         self.log_dict(losses)
-        return losses['loss']
+        return losses['train_loss']
     
     def validation_step(self, batch, batch_idx):
         x, y = batch
@@ -73,7 +117,7 @@ class BaseVAE(pl.LightningModule):
         losses = self.loss_function(x, recon, mu, log_var)
         losses = {"val_" + k: v for k, v in losses.items()}
         self.log_dict(losses)
-        return losses['loss']
+        return losses['val_loss']
     
     def test_step(self, batch, batch_idx):
         x, y = batch
@@ -81,10 +125,13 @@ class BaseVAE(pl.LightningModule):
         losses = self.loss_function(x, recon, mu, log_var)
         losses = {"test_" + k: v for k, v in losses.items()}
         self.log_dict(losses)
-        return losses['loss']
+        return losses['test_loss']
+    
+    def on_validation_end(self):
+        self.sample_images()
     
     def configure_optimizers(self):
-        return torch.optim.AdamW(self.parameters(), lr=1e-3)
+        return torch.optim.AdamW(self.parameters(), lr=self.learning_rate, weight_decay=self.weight_decay)
     
 
 
