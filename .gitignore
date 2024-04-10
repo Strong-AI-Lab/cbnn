@@ -5,3 +5,4 @@ __pycache__/
 *-batches-py/
 checkpoints/
 lightning_logs/
+nohup.out
