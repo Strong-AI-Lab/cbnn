@@ -29,7 +29,7 @@ class CNNVariationalDecoder(torch.nn.Module):
         # Build Decoder
         modules = []
 
-        self.decoder_input = torch.nn.Linear(latent_dim, self.hidden_dims[0] * self.reduced_dims)
+        self.decoder_input = torch.nn.Linear(latent_dim, self.hidden_dims[0] * self.reduced_dims**2)
 
         for i in range(len(hidden_dims) - 1):
             modules.append(

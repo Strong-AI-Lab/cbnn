@@ -2,9 +2,13 @@ aiohttp==3.9.3
 aiosignal==1.3.1
 async-timeout==4.0.3
 attrs==23.2.0
+beautifulsoup4==4.12.3
+certifi==2024.2.2
+charset-normalizer==3.3.2
 filelock==3.13.3
 frozenlist==1.4.1
 fsspec==2024.3.1
+gdown==5.1.0
 idna==3.6
 Jinja2==3.1.3
 lightning-utilities==0.11.2
@@ -27,8 +31,11 @@ nvidia-nvjitlink-cu12==12.4.99
 nvidia-nvtx-cu12==12.1.105
 packaging==24.0
 pillow==10.3.0
-pytorch-lightning==2.2.1
+PySocks==1.7.1
+pytorch-lightning==1.9.0
 PyYAML==6.0.1
+requests==2.31.0
+soupsieve==2.5
 sympy==1.12
 torch==2.2.2
 torchmetrics==1.3.2
@@ -36,4 +43,5 @@ torchvision==0.17.2
 tqdm==4.66.2
 triton==2.2.0
 typing-extensions==4.10.0
+urllib3==2.2.1
 yarl==1.9.4

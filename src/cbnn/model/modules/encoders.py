@@ -37,8 +37,8 @@ class CNNVariationalEncoder(torch.nn.Module):
             in_channels = h_dim
 
         self.encoder = torch.nn.Sequential(*modules)
-        self.fc_mu = torch.nn.Linear(hidden_dims[-1]*self.reduced_dims, latent_dim)
-        self.fc_var = torch.nn.Linear(hidden_dims[-1]*self.reduced_dims, latent_dim)        
+        self.fc_mu = torch.nn.Linear(hidden_dims[-1]*self.reduced_dims**2, latent_dim)
+        self.fc_var = torch.nn.Linear(hidden_dims[-1]*self.reduced_dims**2, latent_dim)        
 
 
     def forward(self, x: torch.Tensor):

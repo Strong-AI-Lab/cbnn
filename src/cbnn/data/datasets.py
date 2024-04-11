@@ -1,5 +1,11 @@
 
-from torchvision import datasets, transforms
+import os
+import json
+from typing import Optional
+
+import torch
+from torchvision import datasets, transforms, io
+import torchvision.transforms.v2 as transforms_v2
 import torch.utils.data as data_utils
 import pytorch_lightning as pl
 
@@ -9,9 +15,36 @@ DEFAULT_SAVE_DIR = "./data/"
 
 
 # Utils
+class BaseDataset(data_utils.Dataset):
+    def __init__(self, x, y, x_transform=None, y_transform=None):
+        self.x = x
+        self.y = y
+        self.x_transform = x_transform
+        self.y_transform = y_transform
+
+    def __len__(self):
+        return len(self.y)
+    
+    def __getitem__(self, idx):
+        x = self.x[idx]
+        y = self.y[idx]
+
+        if self.x_transform:
+            x = self.x_transform(x)
+
+        if self.y_transform:
+            y = self.y_transform(y)
+
+        return x, y
+
 class BaseDataModule(pl.LightningDataModule):
-    def __init__(self, data_dir: str = DEFAULT_SAVE_DIR, batch_size: int = 32, num_workers: int = 4, train_val_split: int = DEFAULT_VALIDATION_SPLIT, **kwargs):
+    def __init__(self, data_dir: str = DEFAULT_SAVE_DIR, split : Optional[str] = None, mode :str = "inference", batch_size: int = 32, num_workers: int = 4, train_val_split: int = DEFAULT_VALIDATION_SPLIT, **kwargs):
         super(BaseDataModule, self).__init__()
+        self.distribution_split = split
+        if split is not None:
+            data_dir = os.path.join(data_dir, split)
+        self.mode = mode
+        
         self.data_dir = data_dir
         self.batch_size = batch_size
         self.num_workers = num_workers
@@ -30,7 +63,9 @@ class BaseDataModule(pl.LightningDataModule):
         parser.add_argument("--data_dir", type=str, default=DEFAULT_SAVE_DIR, help="Path to the data directory.")
         parser.add_argument("--batch_size", type=int, default=32, help="Batch size for the data loader.")
         parser.add_argument("--num_workers", type=int, default=4, help="Number of workers for the data loader.")
-        parser.add_argument("--train_val_split", type=float, default=DEFAULT_VALIDATION_SPLIT, help="Validation split fraction.")
+        parser.add_argument("--train_val_split", type=float, default=DEFAULT_VALIDATION_SPLIT, help="Optional. Validation split fraction. Is used for datasets with no validation set provided.")
+        parser.add_argument("--split", type=str, default=None, help="Optional. Split of the dataset to use if the dataset contins multiple splits (e.g. i.i.d and o.o.d).")
+        parser.add_argument("--mode", type=str, default="inference", help="Optional. Mode of the data module (inference/generation). Used only if the dataset contains multiple images per input. In inference mode, an extra dimension is added to the input to represent the sequence of images. In generation mode, the input is a single image and the output is an auxiliary task requiring a single image.")
         return parent_parser
 
     def prepare_data(self):
@@ -53,8 +88,8 @@ class BaseDataModule(pl.LightningDataModule):
 
 # Data Modules
 class MNISTDataModule(BaseDataModule):
-    def __init__(self, data_dir: str = DEFAULT_SAVE_DIR, batch_size: int = 32, num_workers: int = 4, train_val_split: int = DEFAULT_VALIDATION_SPLIT, **kwargs):
-        super(MNISTDataModule, self).__init__(data_dir, batch_size, num_workers, train_val_split)
+    def __init__(self, data_dir: str = DEFAULT_SAVE_DIR, split : Optional[str] = None, mode :str = "inference", batch_size: int = 32, num_workers: int = 4, train_val_split: int = DEFAULT_VALIDATION_SPLIT, **kwargs):
+        super(MNISTDataModule, self).__init__(data_dir, split, mode, batch_size, num_workers, train_val_split, **kwargs)
         self.transform = transforms.Compose([
             transforms.ToTensor(),
             transforms.Pad(2),
@@ -76,8 +111,8 @@ class MNISTDataModule(BaseDataModule):
 
 
 class MNISTOODDataModule(MNISTDataModule):
-    def __init__(self, data_dir: str = DEFAULT_SAVE_DIR, batch_size: int = 32, num_workers: int = 4, train_val_split: int = DEFAULT_VALIDATION_SPLIT, **kwargs):
-        super(MNISTOODDataModule, self).__init__(data_dir, batch_size, num_workers, train_val_split)
+    def __init__(self, data_dir: str = DEFAULT_SAVE_DIR, split : Optional[str] = None, mode :str = "inference", batch_size: int = 32, num_workers: int = 4, train_val_split: int = DEFAULT_VALIDATION_SPLIT, **kwargs):
+        super(MNISTOODDataModule, self).__init__(data_dir, split, mode, batch_size, num_workers, train_val_split, **kwargs)
         self.transform_shift = transforms.Compose([
             transforms.RandomAffine(0, translate=(0.1, 0.1)),
             transforms.ToTensor(),
@@ -95,8 +130,8 @@ class MNISTOODDataModule(MNISTDataModule):
 
 
 class CIFAR10DataModule(BaseDataModule):
-    def __init__(self, data_dir: str = DEFAULT_SAVE_DIR, batch_size: int = 32, num_workers: int = 4, train_val_split: int = DEFAULT_VALIDATION_SPLIT, **kwargs):
-        super(CIFAR10DataModule, self).__init__(data_dir, batch_size, num_workers, train_val_split)
+    def __init__(self, data_dir: str = DEFAULT_SAVE_DIR, split : Optional[str] = None, mode :str = "inference", batch_size: int = 32, num_workers: int = 4, train_val_split: int = DEFAULT_VALIDATION_SPLIT, **kwargs):
+        super(CIFAR10DataModule, self).__init__(data_dir, split, mode, batch_size, num_workers, train_val_split, **kwargs)
         self.transform = transforms.Compose([
             transforms.ToTensor(),
             transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5))
@@ -117,8 +152,8 @@ class CIFAR10DataModule(BaseDataModule):
 
 
 class CIFAR10OODDataModule(CIFAR10DataModule):
-    def __init__(self, data_dir: str = DEFAULT_SAVE_DIR, batch_size: int = 32, num_workers: int = 4, train_val_split: int = DEFAULT_VALIDATION_SPLIT, **kwargs):
-        super(CIFAR10OODDataModule, self).__init__(data_dir, batch_size, num_workers, train_val_split)
+    def __init__(self, data_dir: str = DEFAULT_SAVE_DIR, split : Optional[str] = None, mode :str = "inference", batch_size: int = 32, num_workers: int = 4, train_val_split: int = DEFAULT_VALIDATION_SPLIT, **kwargs):
+        super(CIFAR10OODDataModule, self).__init__(data_dir, split, mode, batch_size, num_workers, train_val_split, **kwargs)
         self.transform_shift = transforms.Compose([
             transforms.RandomAffine(0, translate=(0.1, 0.1)),
             transforms.ToTensor(),
@@ -134,12 +169,85 @@ class CIFAR10OODDataModule(CIFAR10DataModule):
 
 
 
+class ACREDataModule(BaseDataModule):
 
-def acre(**kwargs):
-    raise NotImplementedError("ACRE dataset not implemented yet.")
+    def __init__(self, data_dir: str = DEFAULT_SAVE_DIR, split : Optional[str] = None, mode :str = "inference", batch_size: int = 32, num_workers: int = 4, train_val_split: int = DEFAULT_VALIDATION_SPLIT, **kwargs):
+        super(ACREDataModule, self).__init__(data_dir, split, mode, batch_size, num_workers, train_val_split, **kwargs)
+        self.load_image_tensor = transforms.Compose([
+            io.read_image,
+            transforms_v2.Lambda(lambda x: x[..., :3,:,:]), # Remove alpha channel
+            transforms_v2.ToDtype(torch.float32),
+            # transforms_v2.Normalize((131.6699, 126.6359, 125.6257, 255.0000), (36.4253, 29.8901, 30.2831,  0.0001)),
+            transforms_v2.Normalize((131.6699, 126.6359, 125.6257), (36.4253, 29.8901, 30.2831)),
+            transforms_v2.Pad([0,40,0,40]), # [320x240] --> [320x320]
+            transforms_v2.Resize((224, 224)) # [320x320] --> [224x224]
+        ])
 
-def acre_ood(**kwargs):
-    raise NotImplementedError("ACRE dataset not implemented yet.")
+    def _build_image_tensor_sequence(self, image_files):
+        image_sequence = []
+        for image_file in image_files:
+            image = self.load_image_tensor(image_file)
+            image_sequence.append(image)
+        return torch.stack(image_sequence)
+
+
+    def prepare_data(self):
+        assert os.path.exists(self.data_dir), f"Dataset not found at {self.data_dir}."
+        assert os.path.exists(os.path.join(self.data_dir, 'config/')), f"Config not found at {os.path.join(self.data_dir, 'config/')}."
+        assert os.path.exists(os.path.join(self.data_dir, 'images/')), f"Images not found at {os.path.join(self.data_dir, 'images/')}."
+        assert os.path.exists(os.path.join(self.data_dir, 'config/', 'test.json')), f"Test config not found at {os.path.join(self.data_dir, 'config/', 'test.json')}."
+        assert os.path.exists(os.path.join(self.data_dir, 'config/', 'train.json')), f"Train config not found at {os.path.join(self.data_dir, 'config/', 'train.json')}."
+        assert os.path.exists(os.path.join(self.data_dir, 'config/', 'val.json')), f"Val config not found at {os.path.join(self.data_dir, 'config/', 'val.json')}."
+
+    def _setup_split(self, split):
+        config_file = os.path.join(self.data_dir, 'config/', f'{split}.json')
+        images_dir = os.path.join(self.data_dir, 'images/')
+        images_files = os.listdir(images_dir)
+
+        with open(config_file, 'r') as f:
+            samples = json.load(f)
+
+        img_idx = 0
+        x = []
+        y = []
+        for sample in samples:
+            offset = len(sample)
+            context = [c for c in sample if c['light_state'] != 'no']
+            target = [c for c in sample if c['light_state'] == 'no']
+
+            nb_context = len(context)
+            nb_target = len(target)
+
+
+            if self.mode == "inference":
+                context_imgs = [os.path.join(images_dir, img) for img in images_files[img_idx:img_idx+nb_context]]
+                for i in range(nb_target):
+                    x.append(context_imgs + [os.path.join(images_dir, images_files[img_idx + nb_context + i])])
+                    y.append(int(target[i]['label']))
+            else:
+                for i in range(len(context)):
+                    x.append(os.path.join(images_dir, images_files[img_idx+i]))
+                    y.append(int(context[i]['light_state'] == 'on'))
+                for j in range(len(target)):
+                    x.append(os.path.join(images_dir, images_files[img_idx + nb_context + j]))
+                    y.append(int(target[j]['label']))
+
+            img_idx += offset
+
+        if self.mode == "inference":
+            return BaseDataset(x, y, self._build_image_tensor_sequence)
+        else:
+            return BaseDataset(x, y, self.load_image_tensor)
+
+    def setup(self, stage=None):
+        if stage == "fit":
+            self.train_data = self._setup_split("train")
+            self.val_data = self._setup_split("val")
+        elif stage == "test":
+            self.test_data = self._setup_split("test")
+        
+
+
 
 def conceptarc(**kwargs):
     raise NotImplementedError("CONCEPTARC dataset not implemented yet.")
@@ -161,8 +269,7 @@ DATASETS = {
     "MNIST_OOD": MNISTOODDataModule,
     "CIFAR10": CIFAR10DataModule,
     "CIFAR10_OOD": CIFAR10OODDataModule,
-    "ACRE": acre,
-    "ACRE_OOD": acre_ood,
+    "ACRE": ACREDataModule,
     "CONCEPTARC": conceptarc,
     "CONCEPTARC_OOD": conceptarc_ood,
     "RAVEN": raven,

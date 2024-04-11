@@ -8,8 +8,8 @@ auto_select_gpus: null
 batch_size: 32
 benchmark: null
 check_val_every_n_epoch: 1
-data: CIFAR10
-data_dir: ./data/CIFAR-10/
+data: MNIST_OOD
+data_dir: ./data/
 default_root_dir: null
 detect_anomaly: false
 devices: '1'
@@ -27,7 +27,7 @@ hidden_dims:
 - 256
 - 512
 image_dim: 32
-in_channels: 3
+in_channels: 1
 inference_mode: true
 inference_weight: 0.4
 ipus: null

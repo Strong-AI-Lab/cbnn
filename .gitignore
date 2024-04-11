@@ -1,6 +1,6 @@
 env/
 __pycache__/
-/data/*/raw/
+/data/
 *.tar.gz
 *-batches-py/
 checkpoints/
