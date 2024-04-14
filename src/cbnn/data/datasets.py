@@ -64,7 +64,7 @@ class BaseDataModule(pl.LightningDataModule):
         parser.add_argument("--batch_size", type=int, default=32, help="Batch size for the data loader.")
         parser.add_argument("--num_workers", type=int, default=4, help="Number of workers for the data loader.")
         parser.add_argument("--train_val_split", type=float, default=DEFAULT_VALIDATION_SPLIT, help="Optional. Validation split fraction. Is used for datasets with no validation set provided.")
-        parser.add_argument("--split", type=str, default=None, help="Optional. Split of the dataset to use if the dataset contins multiple splits (e.g. i.i.d and o.o.d).")
+        parser.add_argument("--split", type=str, default=None, help="Optional. Split of the dataset to use if the dataset contains multiple splits (e.g. i.i.d and o.o.d).")
         parser.add_argument("--mode", type=str, default="inference", help="Optional. Mode of the data module (inference/generation). Used only if the dataset contains multiple images per input. In inference mode, an extra dimension is added to the input to represent the sequence of images. In generation mode, the input is a single image and the output is an auxiliary task requiring a single image.")
         return parent_parser
 
@@ -306,7 +306,7 @@ class RAVENDataModule(BaseDataModule):
     def __init__(self, data_dir: str = DEFAULT_SAVE_DIR, split: Optional[str] = None, mode: str = "inference", batch_size: int = 32, num_workers: int = 4, train_val_split: int = DEFAULT_VALIDATION_SPLIT, **kwargs):
         super(RAVENDataModule, self).__init__(data_dir, split, mode, batch_size, num_workers, train_val_split, **kwargs)
         self.image_transform_fn = transforms_v2.Compose([
-            transforms_v2.ToTensor(), # [0, 255] -> [0, 1]
+            transforms.ToTensor(), # [0, 255] -> [0, 1]
             transforms_v2.ToDtype(torch.float32),
             transforms_v2.Normalize((0.8522,), (0.2990,)),
         ])
@@ -450,7 +450,7 @@ class ConceptARCDataModule(BaseDataModule):
         y = []
         for key in json_data.keys(): # ['train', 'test']
             for sample in json_data[key]:
-                if self.mode == "inference":
+                if self.mode == "inference": # TODO: fix problem in inference mode. Number of images in the context can vary!
                     if key == 'train':
                         if len(x) == 0: # Initialisation of concept sample
                             x.append([])

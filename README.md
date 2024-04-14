@@ -45,6 +45,15 @@ unzip <file_name>.zip
 ```
 
 
+# Test
+
+To run the tests, use the following command:
+```bash
+pytest
+```
+Make sure the data is properly downloaded before running the tests. Running the tests should take a couple minutes depending on your config.
+
+
 # Usage
 
 To run the experiments from a config file, use the following command: 
