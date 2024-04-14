@@ -6,6 +6,7 @@ from ..trainer.losses import normal_kullback_leibler_divergence
 from .modules.encoders import CNNVariationalEncoder
 from .modules.decoders import CNNVariationalDecoder
 from .modules.classifiers import MLPClassifier
+from .utils import tensor_to_rgb
 
 import torch
 import pytorch_lightning as pl
@@ -70,9 +71,15 @@ class BaseVAE(pl.LightningModule):
             test_input, _ = next(iter(self.trainer.datamodule.val_dataloader()))
             test_input = test_input.to(device)
 
+            # Format image if needed
+            if test_input.shape[1] > 3:
+                test_input_rgb = tensor_to_rgb(test_input)
+            else:
+                test_input_rgb = test_input
+
             # Save input images
             os.makedirs(os.path.join(self.logger.log_dir, "Input_Images"), exist_ok=True)
-            vutils.save_image(test_input.data,
+            vutils.save_image(test_input_rgb.data,
                             os.path.join(self.logger.log_dir, 
                                         "Input_Images", 
                                         f"input_{self.logger.name}_Epoch_{self.current_epoch}.png"),
@@ -81,6 +88,9 @@ class BaseVAE(pl.LightningModule):
 
             # Generate reconstruction images
             recons = self.generate(test_input)
+            if recons.shape[1] > 3:
+                recons = tensor_to_rgb(recons)
+
             os.makedirs(os.path.join(self.logger.log_dir, "Reconstructions"), exist_ok=True)
             vutils.save_image(recons.data,
                             os.path.join(self.logger.log_dir, 
@@ -91,6 +101,9 @@ class BaseVAE(pl.LightningModule):
         
             # Generate samples
             samples = self.decode(torch.randn(num_samples,self.latent_dim).to(device))
+            if samples.shape[1] > 3:
+                samples = tensor_to_rgb(samples)
+
             os.makedirs(os.path.join(self.logger.log_dir, "Samples"), exist_ok=True)
             vutils.save_image(samples.cpu().data,
                             os.path.join(self.logger.log_dir, 

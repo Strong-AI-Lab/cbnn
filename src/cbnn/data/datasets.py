@@ -3,6 +3,8 @@ import os
 import json
 from typing import Optional
 import numpy as np
+import requests
+import tqdm
 
 import torch
 from torchvision import datasets, transforms, io
@@ -175,7 +177,7 @@ class ACREDataModule(BaseDataModule):
 
         super(ACREDataModule, self).__init__(data_dir, split, mode, batch_size, num_workers, train_val_split, **kwargs)
         self.load_image_tensor = transforms.Compose([
-            io.read_image,
+            io.read_image, # directly return Tensors in range [0,255] so we normalize from this range
             transforms_v2.Lambda(lambda x: x[..., :3,:,:]), # Remove alpha channel
             transforms_v2.ToDtype(torch.float32),
             # transforms_v2.Normalize((131.6699, 126.6359, 125.6257, 255.0000), (36.4253, 29.8901, 30.2831,  0.0001)),
@@ -353,6 +355,140 @@ class RAVENDataModule(BaseDataModule):
                 
         return BaseDataset(x, y, self.transform, self.target_transform)
 
+    def setup(self, stage=None):
+        if stage == "fit":
+            self.train_data = self._setup_split("train")
+            self.val_data = self._setup_split("val")
+        elif stage == "test":
+            self.test_data = self._setup_split("test")
+
+
+
+class ConceptARCDataModule(BaseDataModule):
+    CONCEPTS = [
+        "AboveBelow",
+        "Center",
+        "CleanUp",
+        "CompleteShape",
+        "Copy",
+        "Count",
+        "ExtendToBoundary",
+        "ExtractObjects",
+        "FilledNotFilled",
+        "HorizontalVertical",
+        "InsideOutside",
+        "MoveToBoundary",
+        "Order",
+        "SameDifferent",
+        "TopBottom2D",
+        "TopBottom3D"
+    ]
+    IDS = {
+        "train": [1, 2, 3, 4, 5, 6],
+        "val": [7, 8],
+        "test": [9, 10]
+    }
+
+    def __init__(self, data_dir: str = DEFAULT_SAVE_DIR, split: Optional[str] = None, mode: str = "inference", batch_size: int = 32, num_workers: int = 4, train_val_split: int = DEFAULT_VALIDATION_SPLIT, **kwargs):
+        super(ConceptARCDataModule, self).__init__(data_dir, split, mode, batch_size, num_workers, train_val_split, **kwargs)
+
+        self.img_transform = transforms_v2.Compose([
+            transforms_v2.ToDtype(torch.float32),
+            transforms_v2.CenterCrop(32),
+            transforms_v2.Resize((128, 128), interpolation=transforms_v2.InterpolationMode.BICUBIC),
+        ])
+        self.random_img_transform = transforms_v2.Compose([
+            transforms_v2.ToDtype(torch.float32),
+            transforms_v2.CenterCrop(32),
+            transforms_v2.Resize((128, 128), interpolation=transforms_v2.InterpolationMode.BICUBIC),
+            transforms_v2.RandomHorizontalFlip(),
+            transforms_v2.RandomVerticalFlip(),
+            transforms_v2.RandomRotation(30),
+            transforms_v2.RandomAffine(0, translate=(0.1, 0.1))
+        ])
+        if mode == "inference":
+            self.transform = self.img_transform
+        else:
+            self.transform = self.random_img_transform
+
+    def _single_transform(self, x, num_classes=10): # Single image transform. [H x W] --> [C x 32 x 32]
+        x = torch.tensor(x)
+        x = torch.nn.functional.one_hot(x.long(), num_classes=num_classes) # [H x W] --> [H x W x C]
+        x = x.permute(2, 0, 1) # [H x W x C] --> [C x H x W]
+        return self.transform(x) # [C x H x W] --> [C x 32 x 32]
+
+    def _multiple_context_transform(self, x):
+        return torch.stack([self._single_transform(i) for i in x])
+
+
+    def _download_data(self, concept : str, i : int, data_dir : Optional[str] =  None):
+        url = f"https://raw.githubusercontent.com/victorvikram/ConceptARC/main/corpus/{concept}/{concept}{int(i)}.json"
+        
+        r = requests.get(url)
+        data = json.loads(r.text)
+
+        # Save data
+        if data_dir is None:
+            data_dir = self.data_dir
+        
+        data_dir = os.path.join(data_dir, concept)
+        if not os.path.exists(data_dir):
+            os.makedirs(data_dir)
+        
+        with open(os.path.join(data_dir, f"{concept}{int(i)}.json"), 'w') as f:
+            json.dump(data, f)
+
+    def _load_data(self, concept : str, i : int):
+        # Load file
+        concept_dir = os.path.join(self.data_dir, concept)
+        concept_file = os.path.join(concept_dir, f"{concept}{int(i)}.json")
+        with open(concept_file, 'r') as f:
+            json_data = json.load(f)
+        
+        # Build data samples
+        x = []
+        y = []
+        for key in json_data.keys(): # ['train', 'test']
+            for sample in json_data[key]:
+                if self.mode == "inference":
+                    if key == 'train':
+                        if len(x) == 0: # Initialisation of concept sample
+                            x.append([])
+                        
+                        x[-1].append(sample['input']) # Context sample input-output pairs (input and output are provided to the context)
+                        x[-1].append(sample['output'])
+                    else:
+                        x[-1].append(sample['input']) # Test sample input-output pairs (only input is provided to the context, output is the target)
+                        y.append(sample['output'])
+
+                else:
+                    x.append(sample['input'])
+                    x.append(sample['output'])
+                    y.append(0)
+                    y.append(0)
+
+        return x, y
+
+
+    def prepare_data(self):
+        for concept in tqdm.tqdm(self.CONCEPTS, position=0):
+            for i in tqdm.tqdm(range(1, 11), position=1, leave=False):
+                if not os.path.exists(os.path.join(self.data_dir, concept, f"{concept}{int(i)}.json")):
+                    self._download_data(concept, i)
+    
+    def _setup_split(self, split):
+        x = []
+        y = []
+        for concept in self.CONCEPTS:
+            for i in self.IDS[split]:
+                concept_x, concept_y = self._load_data(concept, i)
+                x += concept_x
+                y += concept_y
+
+        if self.mode == "inference":
+            return BaseDataset(x, y, self._multiple_context_transform, self._single_transform)
+        else:
+            return BaseDataset(x, y, self._single_transform) # No target transform during generation mode as y is not used
 
     def setup(self, stage=None):
         if stage == "fit":
@@ -363,13 +499,6 @@ class RAVENDataModule(BaseDataModule):
 
 
 
-def conceptarc(**kwargs):
-    raise NotImplementedError("CONCEPTARC dataset not implemented yet.")
-
-def conceptarc_ood(**kwargs):
-    raise NotImplementedError("CONCEPTARC dataset not implemented yet.")
-
-
 
 
 DATASETS = {
@@ -378,8 +507,7 @@ DATASETS = {
     "CIFAR10": CIFAR10DataModule,
     "CIFAR10_OOD": CIFAR10OODDataModule,
     "ACRE": ACREDataModule,
-    "CONCEPTARC": conceptarc,
-    "CONCEPTARC_OOD": conceptarc_ood,
+    "CONCEPTARC": ConceptARCDataModule,
     "RAVEN": RAVENDataModule
 }
 

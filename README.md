@@ -22,16 +22,16 @@ pip install -r requirements.txt
 
 The data used in the experiments are not included in the repository due to their large memory footprint. They are either automatically downloaded when the dataset is used or they must be downloaded separately, as indicated in the next table. The data can be downloaded from the following links:
 
-| Dataset         | Split | Requires download    | Link                                                                    | File ID                                |
-|-----------------|-------|----------------------|-------------------------------------------------------------------------|----------------------------------------|
-| MNIST           |       |  auto                |                                                                         |                                        |
-| CIFAR10         |       |  auto                |                                                                         |                                        |
-| ACRE            | IID   |  yes                 | [project homepage](https://wellyzhang.github.io/project/acre.html)      | 1P0WBnnjWolGsrATUQtx4ictiYlOGc-OT      |
-|                 | Comp  |  yes                 |                                                                         | 1-LZMt08a1v-KSuaQTS1lqD6BCEw47LEY      |
-|                 | Comp  |  yes                 |                                                                         | 1Sn_tKbe6mMv7Tc_y6hJZnm7lSenjwIys      |
-| CONCEPTARC      |       |  yes                 |                                                                         |                                        |
-| RAVEN           | IID   |  yes                 | [project homepage](https://wellyzhang.github.io/project/raven.html)     | 111swnEzAY2NfZgeyAhVwQujMjRUfeyuY      |
-|                 | OOD   |  no (requires IID)   |                                                                         |                                        |
+| Dataset         | Split | Requires download    | Link                                                                                                          | File ID                                |
+|-----------------|-------|----------------------|---------------------------------------------------------------------------------------------------------------|----------------------------------------|
+| MNIST           |       |  auto                | [torchvision documentation](https://pytorch.org/vision/main/generated/torchvision.datasets.MNIST.html)        |                                        |
+| CIFAR10         |       |  auto                | [torchvision documentation](https://pytorch.org/vision/master/generated/torchvision.datasets.CIFAR10.html)    |                                        |
+| ACRE            | IID   |  yes                 | [project homepage](https://wellyzhang.github.io/project/acre.html)                                            | 1P0WBnnjWolGsrATUQtx4ictiYlOGc-OT      |
+|                 | Comp  |  yes                 |                                                                                                               | 1-LZMt08a1v-KSuaQTS1lqD6BCEw47LEY      |
+|                 | Comp  |  yes                 |                                                                                                               | 1Sn_tKbe6mMv7Tc_y6hJZnm7lSenjwIys      |
+| CONCEPTARC      |       |  auto                | [github page](https://github.com/victorvikram/ConceptARC)                                                     |                                        |
+| RAVEN           | IID   |  yes                 | [project homepage](https://wellyzhang.github.io/project/raven.html)                                           | 111swnEzAY2NfZgeyAhVwQujMjRUfeyuY      |
+|                 | OOD   |  no (requires IID)   |                                                                                                               |                                        |
 
 
 Download the data using the following command:
