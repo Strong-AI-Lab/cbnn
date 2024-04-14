@@ -67,9 +67,8 @@ class BaseVAE(pl.LightningModule):
         try:
             device = next(self.parameters()).device
             # Get sample reconstruction image            
-            test_input, test_label = next(iter(self.trainer.datamodule.val_dataloader()))
+            test_input, _ = next(iter(self.trainer.datamodule.val_dataloader()))
             test_input = test_input.to(device)
-            test_label = test_label.to(device)
 
             # Save input images
             os.makedirs(os.path.join(self.logger.log_dir, "Input_Images"), exist_ok=True)

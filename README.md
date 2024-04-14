@@ -26,11 +26,12 @@ The data used in the experiments are not included in the repository due to their
 |-----------------|-------|----------------------|-------------------------------------------------------------------------|----------------------------------------|
 | MNIST           |       |  auto                |                                                                         |                                        |
 | CIFAR10         |       |  auto                |                                                                         |                                        |
-| ACRE            | IID   |  X                   | [project homepage](https://wellyzhang.github.io/project/acre.html)      | 1P0WBnnjWolGsrATUQtx4ictiYlOGc-OT      |
-|                 | Comp  |  X                   |                                                                         | 1-LZMt08a1v-KSuaQTS1lqD6BCEw47LEY      |
-|                 | Comp  |  X                   |                                                                         | 1Sn_tKbe6mMv7Tc_y6hJZnm7lSenjwIys      |
-| CONCEPTARC      |       |  X                   |                                                                         |                                        |
-| RAVEN           |       |  X                   |                                                                         |                                        |
+| ACRE            | IID   |  yes                 | [project homepage](https://wellyzhang.github.io/project/acre.html)      | 1P0WBnnjWolGsrATUQtx4ictiYlOGc-OT      |
+|                 | Comp  |  yes                 |                                                                         | 1-LZMt08a1v-KSuaQTS1lqD6BCEw47LEY      |
+|                 | Comp  |  yes                 |                                                                         | 1Sn_tKbe6mMv7Tc_y6hJZnm7lSenjwIys      |
+| CONCEPTARC      |       |  yes                 |                                                                         |                                        |
+| RAVEN           | IID   |  yes                 | [project homepage](https://wellyzhang.github.io/project/raven.html)     | 111swnEzAY2NfZgeyAhVwQujMjRUfeyuY      |
+|                 | OOD   |  no (requires IID)   |                                                                         |                                        |
 
 
 Download the data using the following command:
