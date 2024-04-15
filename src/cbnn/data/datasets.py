@@ -75,13 +75,13 @@ class BaseDataModule(pl.LightningDataModule):
         raise NotImplementedError()
 
     def train_dataloader(self):
-        return data_utils.DataLoader(self.train_data, batch_size=self.batch_size, num_workers=self.num_workers)
+        return data_utils.DataLoader(self.train_data, batch_size=self.batch_size, num_workers=self.num_workers, shuffle=True)
 
     def val_dataloader(self):
-        return data_utils.DataLoader(self.val_data, batch_size=self.batch_size, num_workers=self.num_workers)
+        return data_utils.DataLoader(self.val_data, batch_size=self.batch_size, num_workers=self.num_workers, shuffle=True)
 
     def test_dataloader(self):
-        return data_utils.DataLoader(self.test_data, batch_size=self.batch_size, num_workers=self.num_workers)
+        return data_utils.DataLoader(self.test_data, batch_size=self.batch_size, num_workers=self.num_workers, shuffle=False)
     
 
 

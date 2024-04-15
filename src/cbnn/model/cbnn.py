@@ -5,6 +5,7 @@ from .modules.encoders import CNNVariationalEncoder
 from .modules.decoders import CNNVariationalDecoder
 from .modules.classifiers import BayesianClassifier
 from ..trainer.losses import normal_kullback_leibler_divergence, gaussian_mutual_information
+from .utils import sample_images
 
 import torch
 import pytorch_lightning as pl
@@ -24,6 +25,8 @@ class CBNN(pl.LightningModule):
             context_kld_weight : float = 1.0,
             ic_mi_weight : float = 1.0,
             wc_mi_weight : float = 1.0,
+            learning_rate : float = 0.005, 
+            weight_decay : float = 0.0,
             **kwargs
             ):
         super(CBNN, self).__init__()
@@ -38,6 +41,7 @@ class CBNN(pl.LightningModule):
         self.z_samples = z_samples
         self.w_samples = w_samples
         self.nb_input_images = nb_input_images
+        self.loaded_context = False
 
         # Loss weights
         self.recon_weight = recon_weight
@@ -45,6 +49,8 @@ class CBNN(pl.LightningModule):
         self.context_kld_weight = context_kld_weight
         self.ic_mi_weight = ic_mi_weight
         self.wc_mi_weight = wc_mi_weight
+        self.learning_rate = learning_rate
+        self.weight_decay = weight_decay
 
         self._init_modules(**kwargs)
 
@@ -65,7 +71,9 @@ class CBNN(pl.LightningModule):
         parser.add_argument('--kld_weight', type=float, default=1.0, help='Weight of the Kullback-Leibler divergence loss.')
         parser.add_argument('--context_kld_weight', type=float, default=1.0, help='Weight of the context Kullback-Leibler divergence loss.')
         parser.add_argument('--ic_mi_weight', type=float, default=1.0, help='Weight of the Inference-Context Mutual Information loss.')
-        parser.add_argument('--wc_mi_weight', type=float, default=1.0, help='Weight of the Weights-Context Mutual Information loss.')
+        # parser.add_argument('--wc_mi_weight', type=float, default=1.0, help='Weight of the Weights-Context Mutual Information loss.')
+        parser.add_argument('--learning_rate', type=float, default=0.005, help='Learning rate for the optimizer.')
+        parser.add_argument('--weight_decay', type=float, default=0.0, help='Weight decay for the optimizer.')
 
         return parent_parser
 
@@ -112,7 +120,7 @@ class CBNN(pl.LightningModule):
             mu = mu.view(batch_size, self.nb_input_images * mu.size(-1))
             log_var = log_var.view(batch_size, self.nb_input_images * log_var.size(-1))
 
-            if x_context is not None:
+            if x_context is None:
                 context_mu = context_mu.view(batch_size, self.nb_input_images * context_mu.size(-1))
                 context_log_var = context_log_var.view(batch_size, self.nb_input_images * context_log_var.size(-1))
             else:
@@ -134,12 +142,19 @@ class CBNN(pl.LightningModule):
             context_zs.append(context_z)
             zs.append(z)
 
-            x_recons.append(self.context_decoder(context_z))
+            if self.nb_input_images > 1:
+                recon_context_z = context_z.view(batch_size * self.nb_input_images, -1)
+                x_recon = self.context_decoder(recon_context_z)
+                x_recon = x_recon.view(batch_size, self.nb_input_images, *x_recon.size()[1:])
+            else:
+                x_recon = self.context_decoder(context_z)
+
+            x_recons.append(x_recon)
 
             for _ in range(self.w_samples):
-                y_j, *w_j = self.inference_classifier(z, context_z)
+                y_j, *w_j = self.inference_classifier(torch.cat([z, context_z], dim=-1))
                 ys.append(y_j)
-                ws.append(torch.cat([w.view(batch_size,-1) for w in w_j], dim=0))
+                ws.append(torch.cat([w.view(-1) for w in w_j], dim=0))
 
         y = torch.stack(ys).mean(dim=0)
 
@@ -151,6 +166,26 @@ class CBNN(pl.LightningModule):
 
         return outputs
     
+
+    def generate(self, x: torch.Tensor):
+        mu, log_var = self.context_encoder(x)
+        z = self.sample(mu, log_var)
+        x_recon = self.context_decoder(z)
+        return x_recon
+    
+    def decode(self, z: torch.Tensor):
+        x_recon = self.context_decoder(z)
+        return x_recon
+    
+    def sample_images(self, num_samples: int = 64):
+        inp, _ = next(iter(self.trainer.datamodule.val_dataloader()))
+        inp = inp.view(-1, *inp.size()[2:])
+        sample_images(self, inp, self.logger.log_dir, self.logger.name, self.current_epoch, num_samples)
+
+    
+    
+    def accuracy(self, y_recon : torch.Tensor, y : torch.Tensor):
+        return torch.sum(y == torch.argmax(y_recon, dim=1)).float() / y.size(0)
     
     def loss_function(self, 
             x : torch.Tensor, 
@@ -170,7 +205,7 @@ class CBNN(pl.LightningModule):
         kld_weight = kwargs['kld_weight'] if 'kld_weight' in kwargs else self.kld_weight
         context_kld_weight = kwargs['context_kld_weight'] if 'context_kld_weight' in kwargs else self.context_kld_weight
         ic_mi_weight = kwargs['ic_mi_weight'] if 'ic_mi_weight' in kwargs else self.ic_mi_weight
-        wc_mi_weight = kwargs['wc_mi_weight'] if 'wc_mi_weight' in kwargs else self.wc_mi_weight
+        # wc_mi_weight = kwargs['wc_mi_weight'] if 'wc_mi_weight' in kwargs else self.wc_mi_weight
         
         # Main inference loss
         infer_loss = torch.nn.functional.cross_entropy(y_recon, y_target)
@@ -191,21 +226,24 @@ class CBNN(pl.LightningModule):
         kld_loss = normal_kullback_leibler_divergence(mu, log_var)
 
         # Inference-Context Mutual Information loss
-        ic_mi_loss = gaussian_mutual_information(z_samples, context_z_samples)
+        ic_mi_loss = gaussian_mutual_information(torch.cat(z_samples, dim=0), torch.cat(context_z_samples, dim=0))
+        if torch.isnan(ic_mi_loss):
+            ic_mi_loss = torch.tensor(0.0).to(ic_mi_loss.device)
 
-        # Weights-Context Mutual Information loss
-        repeated_context_z_samples = [z for z in context_z_samples for _ in range(self.w_samples)]
-        wc_mi_loss = gaussian_mutual_information(weight_samples, repeated_context_z_samples)
+        # Weights-Context Mutual Information loss (too expensive to compute for now)
+        # reduced_context_z_samples = torch.cat(context_z_samples, dim=0)[torch.randperm(len(context_z_samples) * context_z_samples[0].size(0))[:len(weight_samples)]]
+        # wc_mi_loss = gaussian_mutual_information(torch.stack(weight_samples, dim=0), reduced_context_z_samples)
 
 
-        loss = infer_loss + recons_weight * recons_loss + context_kld_weight * context_kld_loss + kld_weight * kld_loss + ic_mi_weight * ic_mi_loss + wc_mi_weight * wc_mi_loss
+        loss = infer_loss + recons_weight * recons_loss + context_kld_weight * context_kld_loss + kld_weight * kld_loss + ic_mi_weight * ic_mi_loss # + wc_mi_weight * wc_mi_loss
         return {'loss': loss, 
                 'Inference_Loss':infer_loss.detach(), 
                 'Reconstruction_Loss':recons_loss.detach(), 
                 'Context_KLD':-context_kld_loss.detach(),
                 'KLD':-kld_loss.detach(), 
                 'IC_MI':ic_mi_loss.detach(), 
-                'WC_MI':wc_mi_loss.detach()
+                # 'WC_MI':wc_mi_loss.detach(),
+                'Accuracy':self.accuracy(y_recon, y_target).detach()
                 }
     
 
@@ -251,8 +289,11 @@ class CBNN(pl.LightningModule):
         self.log_dict(losses)
         return losses['test_loss']
     
+    def on_validation_end(self):
+        self.sample_images()
+    
     def configure_optimizers(self):
-        return torch.optim.AdamW(self.parameters(), lr=1e-3)
+        return torch.optim.AdamW(self.parameters(), lr=self.learning_rate, weight_decay=self.weight_decay)
     
 
 
@@ -269,11 +310,13 @@ class CNN_CBNN(CBNN):
             classifier_nb_layers: int = 3,
             **kwargs):
         
+        self.latent_dim = latent_dim
+        
         # Build modules
         self.context_encoder = CNNVariationalEncoder(in_channels, image_dim, latent_dim, encoder_hidden_dims)
         self.context_decoder = CNNVariationalDecoder(latent_dim, in_channels, image_dim, encoder_hidden_dims.reverse() if encoder_hidden_dims is not None else None)
         self.inference_encoder = CNNVariationalEncoder(in_channels, image_dim, latent_dim, encoder_hidden_dims)
-        self.inference_classifier = BayesianClassifier(2 * latent_dim, out_channels, classifier_hidden_dim, classifier_nb_layers)
+        self.inference_classifier = BayesianClassifier(2 * self.nb_input_images * latent_dim, out_channels, classifier_hidden_dim, classifier_nb_layers)
     
     @classmethod
     def add_model_specific_args(cls, parent_parser):

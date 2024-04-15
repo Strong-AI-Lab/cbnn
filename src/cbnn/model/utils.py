@@ -1,5 +1,10 @@
 
+import os
+
 import torch
+from torch.utils.data import DataLoader
+import torchvision.utils as vutils
+
 
 COLOR_CODE = [
             [0.0, 0.0, 0.0], 
@@ -24,3 +29,53 @@ def tensor_to_rgb(x : torch.Tensor) -> torch.Tensor:
     x = x.permute(0, 2, 3, 1)
     x = torch.matmul(x,code)
     return x.permute(0, 3, 1, 2)
+
+
+def sample_images(model : torch.nn.Module, data : torch.Tensor, log_dir : str, log_name : str, epoch : int, num_samples: int = 64):
+    try:
+        device = next(model.parameters()).device
+        test_input = data.to(device)
+
+        # Format image if needed
+        if test_input.shape[1] > 3:
+            test_input_rgb = tensor_to_rgb(test_input)
+        else:
+            test_input_rgb = test_input
+
+        # Save input images
+        os.makedirs(os.path.join(log_dir, "Input_Images"), exist_ok=True)
+        vutils.save_image(test_input_rgb.data,
+                        os.path.join(log_dir, 
+                                    "Input_Images", 
+                                    f"input_{log_name}_Epoch_{epoch}.png"),
+                        normalize=True,
+                        nrow=12)
+
+        # Generate reconstruction images
+        recons = model.generate(test_input)
+        if recons.shape[1] > 3:
+            recons = tensor_to_rgb(recons)
+
+        os.makedirs(os.path.join(log_dir, "Reconstructions"), exist_ok=True)
+        vutils.save_image(recons.data,
+                        os.path.join(log_dir, 
+                                    "Reconstructions", 
+                                    f"recons_{log_name}_Epoch_{epoch}.png"),
+                        normalize=True,
+                        nrow=12)
+    
+        # Generate samples
+        samples = model.decode(torch.randn(num_samples,model.latent_dim).to(device))
+        if samples.shape[1] > 3:
+            samples = tensor_to_rgb(samples)
+
+        os.makedirs(os.path.join(log_dir, "Samples"), exist_ok=True)
+        vutils.save_image(samples.cpu().data,
+                        os.path.join(log_dir, 
+                                    "Samples",      
+                                    f"{log_name}_Epoch_{epoch}.png"),
+                        normalize=True,
+                        nrow=12)
+    
+    except StopIteration:
+        pass

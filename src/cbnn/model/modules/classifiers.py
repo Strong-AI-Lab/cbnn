@@ -70,7 +70,7 @@ class BayesianClassifier(torch.nn.Module):
         if eps is None:
             eps = torch.randn_like(std)
         else:
-            assert eps.shape == std.shape, "Shape mismatch between eps and std"
+            assert eps.shape == std.shape, f"Shape mismatch between eps and std: {eps.shape} != {std.shape}"
 
         return mean + eps * std
 

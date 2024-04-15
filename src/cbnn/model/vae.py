@@ -6,11 +6,10 @@ from ..trainer.losses import normal_kullback_leibler_divergence
 from .modules.encoders import CNNVariationalEncoder
 from .modules.decoders import CNNVariationalDecoder
 from .modules.classifiers import MLPClassifier
-from .utils import tensor_to_rgb
+from .utils import sample_images
 
 import torch
 import pytorch_lightning as pl
-import torchvision.utils as vutils
 
 
 class BaseVAE(pl.LightningModule):
@@ -65,55 +64,8 @@ class BaseVAE(pl.LightningModule):
         return self.forward(x)[0]
     
     def sample_images(self, num_samples: int = 64):
-        try:
-            device = next(self.parameters()).device
-            # Get sample reconstruction image            
-            test_input, _ = next(iter(self.trainer.datamodule.val_dataloader()))
-            test_input = test_input.to(device)
-
-            # Format image if needed
-            if test_input.shape[1] > 3:
-                test_input_rgb = tensor_to_rgb(test_input)
-            else:
-                test_input_rgb = test_input
-
-            # Save input images
-            os.makedirs(os.path.join(self.logger.log_dir, "Input_Images"), exist_ok=True)
-            vutils.save_image(test_input_rgb.data,
-                            os.path.join(self.logger.log_dir, 
-                                        "Input_Images", 
-                                        f"input_{self.logger.name}_Epoch_{self.current_epoch}.png"),
-                            normalize=True,
-                            nrow=12)
-
-            # Generate reconstruction images
-            recons = self.generate(test_input)
-            if recons.shape[1] > 3:
-                recons = tensor_to_rgb(recons)
-
-            os.makedirs(os.path.join(self.logger.log_dir, "Reconstructions"), exist_ok=True)
-            vutils.save_image(recons.data,
-                            os.path.join(self.logger.log_dir, 
-                                        "Reconstructions", 
-                                        f"recons_{self.logger.name}_Epoch_{self.current_epoch}.png"),
-                            normalize=True,
-                            nrow=12)
-        
-            # Generate samples
-            samples = self.decode(torch.randn(num_samples,self.latent_dim).to(device))
-            if samples.shape[1] > 3:
-                samples = tensor_to_rgb(samples)
-
-            os.makedirs(os.path.join(self.logger.log_dir, "Samples"), exist_ok=True)
-            vutils.save_image(samples.cpu().data,
-                            os.path.join(self.logger.log_dir, 
-                                        "Samples",      
-                                        f"{self.logger.name}_Epoch_{self.current_epoch}.png"),
-                            normalize=True,
-                            nrow=12)
-        
-        except StopIteration:
-            pass
+        inp, _ = next(iter(self.trainer.datamodule.val_dataloader()))
+        sample_images(self, inp, self.logger.log_dir, self.logger.name, self.current_epoch, num_samples)
     
     def loss_function(self, x : torch.Tensor, x_recon : torch.Tensor, mu : torch.Tensor, log_var : torch.Tensor, **kwargs):
         kld_weight = kwargs['kld_weight'] if 'kld_weight' in kwargs else self.kld_weight
