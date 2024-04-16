@@ -24,7 +24,7 @@ class CBNN(pl.LightningModule):
             kld_weight : float = 1.0,
             context_kld_weight : float = 1.0,
             ic_mi_weight : float = 1.0,
-            wc_mi_weight : float = 1.0,
+            # wc_mi_weight : float = 1.0,
             learning_rate : float = 0.005, 
             weight_decay : float = 0.0,
             **kwargs
@@ -48,13 +48,13 @@ class CBNN(pl.LightningModule):
         self.kld_weight = kld_weight
         self.context_kld_weight = context_kld_weight
         self.ic_mi_weight = ic_mi_weight
-        self.wc_mi_weight = wc_mi_weight
+        # self.wc_mi_weight = wc_mi_weight
         self.learning_rate = learning_rate
         self.weight_decay = weight_decay
 
         self._init_modules(**kwargs)
 
-        self.save_hyperparameters()
+        self.save_hyperparameters(ignore=kwargs.keys())
 
 
     def _init_modules(self,**kwargs):
@@ -258,7 +258,7 @@ class CBNN(pl.LightningModule):
 
         losses = self.loss_function(x, x_recons, y, y_recon, *outputs)
         losses = {"train_" + k: v for k, v in losses.items()}
-        self.log_dict(losses)
+        self.log_dict(losses, sync_dist=True)
         return losses['train_loss']
     
     def validation_step(self, batch, batch_idx):
@@ -272,8 +272,11 @@ class CBNN(pl.LightningModule):
         
         losses = self.loss_function(x, x_recons, y, y_recon, *outputs)
         losses = {"val_" + k: v for k, v in losses.items()}
-        self.log_dict(losses)
+        self.log_dict(losses, sync_dist=True)
         return losses['val_loss']
+    
+    def on_validation_end(self):
+        self.sample_images()
     
     def test_step(self, batch, batch_idx):
         if self.loaded_context:
@@ -286,11 +289,9 @@ class CBNN(pl.LightningModule):
         
         losses = self.loss_function(x, x_recons, y, y_recon, *outputs)
         losses = {"test_" + k: v for k, v in losses.items()}
-        self.log_dict(losses)
+        self.log_dict(losses, sync_dist=True)
         return losses['test_loss']
     
-    def on_validation_end(self):
-        self.sample_images()
     
     def configure_optimizers(self):
         return torch.optim.AdamW(self.parameters(), lr=self.learning_rate, weight_decay=self.weight_decay)
@@ -314,9 +315,11 @@ class CNN_CBNN(CBNN):
         
         # Build modules
         self.context_encoder = CNNVariationalEncoder(in_channels, image_dim, latent_dim, encoder_hidden_dims)
-        self.context_decoder = CNNVariationalDecoder(latent_dim, in_channels, image_dim, encoder_hidden_dims.reverse() if encoder_hidden_dims is not None else None)
+        self.context_decoder = CNNVariationalDecoder(latent_dim, in_channels, image_dim, encoder_hidden_dims[::-1] if encoder_hidden_dims is not None else None)
         self.inference_encoder = CNNVariationalEncoder(in_channels, image_dim, latent_dim, encoder_hidden_dims)
         self.inference_classifier = BayesianClassifier(2 * self.nb_input_images * latent_dim, out_channels, classifier_hidden_dim, classifier_nb_layers)
+
+        self.save_hyperparameters(ignore=kwargs.keys())
     
     @classmethod
     def add_model_specific_args(cls, parent_parser):

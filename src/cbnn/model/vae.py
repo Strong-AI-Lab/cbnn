@@ -27,7 +27,7 @@ class BaseVAE(pl.LightningModule):
         self.weight_decay = weight_decay
 
         self._init_modules(**kwargs)
-        self.save_hyperparameters()
+        self.save_hyperparameters(ignore=kwargs.keys())
 
 
     def _init_modules(self,**kwargs):
@@ -82,7 +82,7 @@ class BaseVAE(pl.LightningModule):
         recon, _, mu, log_var = self(x)
         losses = self.loss_function(x, recon, mu, log_var)
         losses = {"train_" + k: v for k, v in losses.items()}
-        self.log_dict(losses)
+        self.log_dict(losses, sync_dist=True)
         return losses['train_loss']
     
     def validation_step(self, batch, batch_idx):
@@ -90,7 +90,7 @@ class BaseVAE(pl.LightningModule):
         recon, _, mu, log_var = self(x)
         losses = self.loss_function(x, recon, mu, log_var)
         losses = {"val_" + k: v for k, v in losses.items()}
-        self.log_dict(losses)
+        self.log_dict(losses, sync_dist=True)
         return losses['val_loss']
     
     def test_step(self, batch, batch_idx):
@@ -98,7 +98,7 @@ class BaseVAE(pl.LightningModule):
         recon, _, mu, log_var = self(x)
         losses = self.loss_function(x, recon, mu, log_var)
         losses = {"test_" + k: v for k, v in losses.items()}
-        self.log_dict(losses)
+        self.log_dict(losses, sync_dist=True)
         return losses['test_loss']
     
     def on_validation_end(self):
@@ -133,6 +133,8 @@ class CNNVAE(BaseVAE):
             
         self.decoder = CNNVariationalDecoder(latent_dim, in_channels, image_dim, hidden_dims)
 
+        self.save_hyperparameters(ignore=kwargs.keys())
+
     @classmethod
     def add_model_specific_args(cls, parent_parser):
         parent_parser = super(CNNVAE, cls).add_model_specific_args(parent_parser)
@@ -164,6 +166,8 @@ class CNNVAEClassifier(CNNVAE):
 
         # Build Classifier
         self.classifier = MLPClassifier(latent_dim, num_classes, latent_dim, num_inference_layers)
+
+        self.save_hyperparameters(ignore=kwargs.keys())
 
     @classmethod
     def add_model_specific_args(cls, parent_parser):
@@ -206,7 +210,7 @@ class CNNVAEClassifier(CNNVAE):
         x_recon, y_recon, _, mu, log_var = self(x)
         losses = self.loss_function(x, x_recon, y, y_recon, mu, log_var)
         losses = {"train_" + k: v for k, v in losses.items()}
-        self.log_dict(losses)
+        self.log_dict(losses, sync_dist=True)
         return losses['train_loss']
     
     def validation_step(self, batch, batch_idx):
@@ -214,7 +218,7 @@ class CNNVAEClassifier(CNNVAE):
         x_recon, y_recon, _, mu, log_var = self(x)
         losses = self.loss_function(x, x_recon, y, y_recon, mu, log_var)
         losses = {"val_" + k: v for k, v in losses.items()}
-        self.log_dict(losses)
+        self.log_dict(losses, sync_dist=True)
         return losses['val_loss']
     
     def test_step(self, batch, batch_idx):
@@ -222,5 +226,5 @@ class CNNVAEClassifier(CNNVAE):
         x_recon, y_recon, _, mu, log_var = self(x)
         losses = self.loss_function(x, x_recon, y, y_recon, mu, log_var)
         losses = {"test_" + k: v for k, v in losses.items()}
-        self.log_dict(losses)
+        self.log_dict(losses, sync_dist=True)
         return losses['test_loss']
