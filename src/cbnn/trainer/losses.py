@@ -35,25 +35,33 @@ def correlation_coefficient(samples : torch.Tensor):
     return covariance / torch.ger(std, std) # [F x F] / [F x F] -> [F x F]
 
 
-def gaussian_mutual_information(samples_p : torch.Tensor, samples_q : torch.Tensor):
+def gaussian_mutual_information(samples_p : torch.Tensor, samples_q : torch.Tensor, max_dim : Optional[int] = 128, boost_coefficients : float = 0.8):
     """
     Compute the mutual information between two sets of samples [B x P] and [B x Q]. It is assumed that the samples are drawn from a joint Gaussian multivariate distribution.
+    [1] MacKay, David JC. Information theory, inference and learning algorithms. Cambridge university press, 2003. (Chapter 11).
     """
     batch_size = samples_p.size(0)
     assert batch_size == samples_q.size(0), "Batch sizes of samples_p and samples_q must be equal"
 
     # Compute the correlation coefficient
-    correlations = correlation_coefficient(torch.cat([samples_p, samples_q], dim=1)) # [B x (P + Q)] -> [(P + Q) x (P + Q)]
+    correlations = correlation_coefficient(torch.cat([samples_p - samples_p.mean(0), samples_q - samples_q.mean(0)], dim=1)) # [B x (P + Q)] -> [(P + Q) x (P + Q)]
 
-    # Mask inter-distribution correlations (we are not interested in the mutual information between the dimensions of the same distribution)
+    # Reduce dimensions and boost coefficients to avoid numerical instability
+    if max_dim is not None:
+        selected_dims = torch.randperm(correlations.size(0))[:max_dim]
+        correlations = correlations[selected_dims][:,selected_dims]
+    correlations = correlations.sign() * correlations.abs()**(1/(1+boost_coefficients))
+
+    # Detach inter-distribution correlations (we are not interested in the mutual information between the dimensions of the same distribution)
     mask = torch.ones_like(correlations)
     mask[:samples_p.size(1), :samples_p.size(1)] = 0
     mask[-samples_q.size(1):, -samples_q.size(1):] = 0
-    correlations = correlations * mask
-    correlations = correlations + torch.eye(correlations.size(0)).to(correlations.device)
+    mask_rev = 1 - mask 
 
-    # Compute the mutual information
-    return -0.5 * torch.logdet(correlations) # [(P + Q) x (P + Q)] -> [1]
+    correlations = correlations * mask + (correlations * mask_rev).detach()
+
+    # Compute the mutual information using the determinant of the correlation matrix, return the exponential for optimization purposes
+    return (-0.5 * torch.det(correlations).abs().log()).exp() # [(P + Q) x (P + Q)] -> [1]
 
 
 

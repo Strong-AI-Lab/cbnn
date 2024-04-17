@@ -227,7 +227,7 @@ class CBNN(pl.LightningModule):
 
         # Inference-Context Mutual Information loss
         ic_mi_loss = gaussian_mutual_information(torch.cat(z_samples, dim=0), torch.cat(context_z_samples, dim=0))
-        if torch.isnan(ic_mi_loss):
+        if torch.isnan(ic_mi_loss) or torch.isinf(ic_mi_loss):
             ic_mi_loss = torch.tensor(0.0).to(ic_mi_loss.device)
 
         # Weights-Context Mutual Information loss (too expensive to compute for now)
