@@ -85,5 +85,15 @@ Common arguments:
 - `--max_epochs`: Maximum number of epochs. You might want to set it as the default value of Pytorch Lightning is 1000.
 
 
+## Hyperparameter search
+
+To run a hyperparameter search, use the following command:
+```bash
+python hyp_search.py
+```
+You can use the same arguments as in the `run.py` script. Please, be aware that the Ray Tune trials are run in a different working directory: the path arguments must be absolute and the logging files are saved in a different directory (check `Ray Tune` documentation for more information).
+
+
+
 ## Architecture
 ![Image Description](assets/cbnn_architecture.png)

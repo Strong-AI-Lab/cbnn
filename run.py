@@ -51,9 +51,7 @@ def parse_args():
 
 
 
-def main():
-    args = parse_args()
-
+def main(args, callbacks=None):
     # Load model
     if not hasattr(args, 'model'):
         print('Error: Model not specified. Please, provide a model to use. Use --help for more information.')
@@ -73,7 +71,8 @@ def main():
     pl.seed_everything(42, workers=True)
     trainer = pl.Trainer.from_argparse_args(
         args,
-        logger=WandbLogger(name=f"{args.model}_train", project=args.wandb_project) if args.wandb_project else True
+        logger=WandbLogger(name=f"{args.model}_train", project=args.wandb_project) if args.wandb_project else True,
+        callbacks = callbacks
     )
 
 
@@ -91,4 +90,5 @@ def main():
 
 
 if __name__ == '__main__':
-    main()
+    args = parse_args()
+    main(args)
