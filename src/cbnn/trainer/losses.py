@@ -43,13 +43,15 @@ def gaussian_mutual_information(samples_p : torch.Tensor, samples_q : torch.Tens
     batch_size = samples_p.size(0)
     assert batch_size == samples_q.size(0), "Batch sizes of samples_p and samples_q must be equal"
 
+    # Reduce dimensions for computational efficiency
+    if max_dim is not None:
+        samples_p = samples_p[:,torch.randperm(samples_p.size(1))[:max_dim // 2]]
+        samples_q = samples_q[:,torch.randperm(samples_q.size(1))[:max_dim // 2]]
+
     # Compute the correlation coefficient
     correlations = correlation_coefficient(torch.cat([samples_p - samples_p.mean(0), samples_q - samples_q.mean(0)], dim=1)) # [B x (P + Q)] -> [(P + Q) x (P + Q)]
 
-    # Reduce dimensions and boost coefficients to avoid numerical instability
-    if max_dim is not None:
-        selected_dims = torch.randperm(correlations.size(0))[:max_dim]
-        correlations = correlations[selected_dims][:,selected_dims]
+    # Boost coefficients to avoid numerical instability
     correlations = correlations.sign() * correlations.abs()**(1/(1+boost_coefficients))
 
     # Detach inter-distribution correlations (we are not interested in the mutual information between the dimensions of the same distribution)
@@ -60,8 +62,8 @@ def gaussian_mutual_information(samples_p : torch.Tensor, samples_q : torch.Tens
 
     correlations = correlations * mask + (correlations * mask_rev).detach()
 
-    # Compute the mutual information using the determinant of the correlation matrix, return the exponential for optimization purposes
-    return (-0.5 * torch.det(correlations).abs().log()).exp() # [(P + Q) x (P + Q)] -> [1]
+    # Compute the mutual information using the determinant of the correlation matrix, return the square for optimization purposes
+    return (-0.5 * torch.det(correlations).abs().log())**2 # [(P + Q) x (P + Q)] -> [1]
 
 
 

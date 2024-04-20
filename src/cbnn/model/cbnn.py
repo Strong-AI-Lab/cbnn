@@ -1,5 +1,5 @@
 
-from typing import Optional, List, NewType
+from typing import Optional, List
 
 from .modules.encoders import CNNVariationalEncoder
 from .modules.decoders import CNNVariationalDecoder
@@ -23,8 +23,9 @@ class CBNN(pl.LightningModule):
             recon_weight : float = 1.0,
             kld_weight : float = 1.0,
             context_kld_weight : float = 1.0,
+            w_kld_weight : float = 1.0,
             ic_mi_weight : float = 1.0,
-            # wc_mi_weight : float = 1.0,
+            wc_mi_weight : float = 1.0,
             learning_rate : float = 0.005, 
             weight_decay : float = 0.0,
             **kwargs
@@ -47,8 +48,9 @@ class CBNN(pl.LightningModule):
         self.recon_weight = recon_weight
         self.kld_weight = kld_weight
         self.context_kld_weight = context_kld_weight
+        self.w_kld_weight = w_kld_weight
         self.ic_mi_weight = ic_mi_weight
-        # self.wc_mi_weight = wc_mi_weight
+        self.wc_mi_weight = wc_mi_weight
         self.learning_rate = learning_rate
         self.weight_decay = weight_decay
 
@@ -70,8 +72,9 @@ class CBNN(pl.LightningModule):
         parser.add_argument('--recon_weight', type=float, default=1.0, help='Weight of the reconstruction loss.')
         parser.add_argument('--kld_weight', type=float, default=1.0, help='Weight of the Kullback-Leibler divergence loss.')
         parser.add_argument('--context_kld_weight', type=float, default=1.0, help='Weight of the context Kullback-Leibler divergence loss.')
+        parser.add_argument('--w_kld_weight', type=float, default=1.0, help='Weight of the weights Kullback-Leibler divergence loss.')
         parser.add_argument('--ic_mi_weight', type=float, default=1.0, help='Weight of the Inference-Context Mutual Information loss.')
-        # parser.add_argument('--wc_mi_weight', type=float, default=1.0, help='Weight of the Weights-Context Mutual Information loss.')
+        parser.add_argument('--wc_mi_weight', type=float, default=1.0, help='Weight of the Weights-Context Mutual Information loss.')
         parser.add_argument('--learning_rate', type=float, default=0.005, help='Learning rate for the optimizer.')
         parser.add_argument('--weight_decay', type=float, default=0.0, help='Weight decay for the optimizer.')
 
@@ -88,7 +91,7 @@ class CBNN(pl.LightningModule):
 
 
     def sample(self, mu: torch.Tensor, log_var: torch.Tensor):
-        std = torch.exp(0.5*log_var)
+        std = torch.exp(0.5 * log_var * 0.001 * 1/torch.sqrt(torch.tensor(log_var.size(-1)).to(log_var.device)))
         eps = torch.randn_like(std)
         return mu + eps*std
 
@@ -204,45 +207,68 @@ class CBNN(pl.LightningModule):
         recons_weight = kwargs['recons_weight'] if 'recons_weight' in kwargs else self.recon_weight
         kld_weight = kwargs['kld_weight'] if 'kld_weight' in kwargs else self.kld_weight
         context_kld_weight = kwargs['context_kld_weight'] if 'context_kld_weight' in kwargs else self.context_kld_weight
+        w_kld_weight = kwargs['w_kld_weight'] if 'w_kld_weight' in kwargs else self.w_kld_weight
         ic_mi_weight = kwargs['ic_mi_weight'] if 'ic_mi_weight' in kwargs else self.ic_mi_weight
-        # wc_mi_weight = kwargs['wc_mi_weight'] if 'wc_mi_weight' in kwargs else self.wc_mi_weight
+        wc_mi_weight = kwargs['wc_mi_weight'] if 'wc_mi_weight' in kwargs else self.wc_mi_weight
         
         # Main inference loss
         infer_loss = torch.nn.functional.cross_entropy(y_recon, y_target)
 
         # Context reconstruction loss
-        recons_loss = 0.0
-        for x_recon in x_recons:
-            recons_loss += torch.nn.functional.mse_loss(x_recon, x)
-        recons_loss /= len(x_recons)
+        recons_loss = torch.tensor(0.0).to(x.device)
+        if self.recon_weight > 0.0:
+            for x_recon in x_recons:
+                recons_loss += torch.nn.functional.mse_loss(x_recon, x)
+            recons_loss /= len(x_recons)
+
 
         # Context Encoder Kullback-Leibler divergence loss
-        context_kld_loss = 0.0
-        for context_mu, context_log_var in zip(context_mus, context_log_vars):
-            context_kld_loss += normal_kullback_leibler_divergence(context_mu, context_log_var)
-        context_kld_loss /= len(context_mus)
+        context_kld_loss = torch.tensor(0.0).to(x.device)
+        if self.context_kld_weight > 0.0:
+            for context_mu, context_log_var in zip(context_mus, context_log_vars):
+                context_kld_loss += normal_kullback_leibler_divergence(context_mu, context_log_var)
+            context_kld_loss /= len(context_mus)
 
         # Inference Encoder Kullback-Leibler divergence loss
-        kld_loss = normal_kullback_leibler_divergence(mu, log_var)
+        if self.kld_weight > 0.0:
+            kld_loss = normal_kullback_leibler_divergence(mu, log_var)
+        else:
+            kld_loss = torch.tensor(0.0).to(x.device)
+
+        # Weights Kullback-Leibler divergence loss
+        if self.w_kld_weight > 0.0:
+            weights_mean, weights_log_var = self.inference_classifier.get_weight_distributions()
+            w_kld_loss = normal_kullback_leibler_divergence(weights_mean, weights_log_var)
+        else:
+            w_kld_loss = torch.tensor(0.0).to(x.device)
+
 
         # Inference-Context Mutual Information loss
-        ic_mi_loss = gaussian_mutual_information(torch.cat(z_samples, dim=0), torch.cat(context_z_samples, dim=0))
-        if torch.isnan(ic_mi_loss) or torch.isinf(ic_mi_loss):
-            ic_mi_loss = torch.tensor(0.0).to(ic_mi_loss.device)
+        if self.ic_mi_weight > 0.0:
+            ic_mi_loss = gaussian_mutual_information(torch.cat(z_samples, dim=0), torch.cat(context_z_samples, dim=0), max_dim=128, boost_coefficients=0.6)
+            if torch.isnan(ic_mi_loss) or torch.isinf(ic_mi_loss):
+                ic_mi_loss = torch.tensor(0.0).to(x.device)
+        else:
+            ic_mi_loss = torch.tensor(0.0).to(x.device)
 
-        # Weights-Context Mutual Information loss (too expensive to compute for now)
-        # reduced_context_z_samples = torch.cat(context_z_samples, dim=0)[torch.randperm(len(context_z_samples) * context_z_samples[0].size(0))[:len(weight_samples)]]
-        # wc_mi_loss = gaussian_mutual_information(torch.stack(weight_samples, dim=0), reduced_context_z_samples)
+        # Weights-Context Mutual Information loss
+        if self.wc_mi_weight > 0.0:
+            wc_mi_loss = gaussian_mutual_information(torch.cat([w.view(1,-1).repeat(context_z_samples[0].size(0) // self.w_samples, 1) for w in weight_samples], dim=0), torch.cat(context_z_samples, dim=0), max_dim=32, boost_coefficients=0.225)
+            if torch.isnan(wc_mi_loss) or torch.isinf(wc_mi_loss):
+                wc_mi_loss = torch.tensor(0.0).to(x.device)
+        else:
+            wc_mi_loss = torch.tensor(0.0).to(x.device)
 
 
-        loss = infer_loss + recons_weight * recons_loss + context_kld_weight * context_kld_loss + kld_weight * kld_loss + ic_mi_weight * ic_mi_loss # + wc_mi_weight * wc_mi_loss
+        loss = infer_loss + recons_weight * recons_loss + context_kld_weight * context_kld_loss + kld_weight * kld_loss + w_kld_weight * w_kld_loss + ic_mi_weight * ic_mi_loss + wc_mi_weight * wc_mi_loss
         return {'loss': loss, 
                 'Inference_Loss':infer_loss.detach(), 
                 'Reconstruction_Loss':recons_loss.detach(), 
                 'Context_KLD':-context_kld_loss.detach(),
+                'Weights_KLD':-w_kld_loss.detach(),
                 'KLD':-kld_loss.detach(), 
                 'IC_MI':ic_mi_loss.detach(), 
-                # 'WC_MI':wc_mi_loss.detach(),
+                'WC_MI':wc_mi_loss.detach(),
                 'Accuracy':self.accuracy(y_recon, y_target).detach()
                 }
     
