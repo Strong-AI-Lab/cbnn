@@ -30,9 +30,9 @@ class CNNVariationalEncoder(torch.nn.Module):
             modules.append(
                 torch.nn.Sequential(
                     torch.nn.Conv2d(in_channels, out_channels=h_dim,
-                              kernel_size= 3, stride= 2, padding  = 1),
+                              kernel_size=3, stride=2, padding=1),
                     torch.nn.BatchNorm2d(h_dim),
-                    torch.nn.LeakyReLU())
+                    torch.nn.SiLU())
             )
             in_channels = h_dim
 

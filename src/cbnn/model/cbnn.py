@@ -100,8 +100,8 @@ class CBNN(pl.LightningModule):
         batch_size = x.size(0)
 
         if self.nb_input_images > 1:
-            assert len(x.size()) > 4, "Input tensor must have at least 5 dimensions when nb_input_images is > 1: (batch, nb_input_images, channels, height, width)"
-            assert x.size(-4) == self.nb_input_images, "Input tensor must have the same number of images as specified by nb_input_images"
+            assert len(x.size()) > 4, f"Input tensor must have at least 5 dimensions when nb_input_images is > 1: (batch, nb_input_images, channels, height, width). Got {len(x.size())} dimensions: {x.size()}"
+            assert x.size(-4) == self.nb_input_images, f"Input tensor must have the same number of images as specified by nb_input_images. Got {x.size(-4)} images ({x.size()}), expected {self.nb_input_images}."
 
             x = x.view(-1, *x.size()[-3:])
             if x_context is not None:
@@ -182,7 +182,8 @@ class CBNN(pl.LightningModule):
     
     def sample_images(self, num_samples: int = 64):
         inp, _ = next(iter(self.trainer.datamodule.val_dataloader()))
-        inp = inp.view(-1, *inp.size()[2:])
+        if self.nb_input_images > 1:
+            inp = inp.view(-1, *inp.size()[2:])
         sample_images(self, inp, self.logger.log_dir, self.logger.name, self.current_epoch, num_samples)
 
     
@@ -284,6 +285,7 @@ class CBNN(pl.LightningModule):
 
         losses = self.loss_function(x, x_recons, y, y_recon, *outputs)
         losses = {"train_" + k: v for k, v in losses.items()}
+        print(losses)
         self.log_dict(losses, sync_dist=True)
         return losses['train_loss']
     
@@ -298,6 +300,7 @@ class CBNN(pl.LightningModule):
         
         losses = self.loss_function(x, x_recons, y, y_recon, *outputs)
         losses = {"val_" + k: v for k, v in losses.items()}
+        print(losses)
         self.log_dict(losses, sync_dist=True)
         return losses['val_loss']
     
@@ -315,6 +318,7 @@ class CBNN(pl.LightningModule):
         
         losses = self.loss_function(x, x_recons, y, y_recon, *outputs)
         losses = {"test_" + k: v for k, v in losses.items()}
+        print(losses)
         self.log_dict(losses, sync_dist=True)
         return losses['test_loss']
     

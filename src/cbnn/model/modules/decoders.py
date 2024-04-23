@@ -37,11 +37,11 @@ class CNNVariationalDecoder(torch.nn.Module):
                     torch.nn.ConvTranspose2d(hidden_dims[i],
                                        hidden_dims[i + 1],
                                        kernel_size=3,
-                                       stride = 2,
+                                       stride=2,
                                        padding=1,
                                        output_padding=1),
                     torch.nn.BatchNorm2d(hidden_dims[i + 1]),
-                    torch.nn.LeakyReLU())
+                    torch.nn.SiLU())
             )
 
         self.decoder = torch.nn.Sequential(*modules)
@@ -54,7 +54,7 @@ class CNNVariationalDecoder(torch.nn.Module):
                                                padding=1,
                                                output_padding=1),
                             torch.nn.BatchNorm2d(hidden_dims[-1]),
-                            torch.nn.LeakyReLU(),
+                            torch.nn.SiLU(),
                             torch.nn.Conv2d(hidden_dims[-1], out_channels=in_channels,
                                       kernel_size= 3, padding= 1),
                             torch.nn.Tanh())
