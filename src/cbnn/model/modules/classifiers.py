@@ -93,7 +93,7 @@ class BayesianClassifier(torch.nn.Module):
         fc_in_weights = self._sample_weights(self.fc_in_mean.weight, self.fc_in_log_var.weight, eps_in)
         fc_out_weights = self._sample_weights(self.fc_out_mean.weight, self.fc_out_log_var.weight, eps_out)
 
-        x = torch.nn.functional.leaky_relu(x @ fc_in_weights)
+        x = torch.nn.functional.silu(x @ fc_in_weights)
         x = self.fc_in_bn(x)
 
         for i in range(self.num_layers):
@@ -102,3 +102,42 @@ class BayesianClassifier(torch.nn.Module):
 
         x = x @ fc_out_weights
         return [x, fc_in_weights, fc_out_weights]
+
+
+class MCQABayesClassifier(BayesianClassifier):
+    """
+    Bayesian classifier for Multiple Choice Question Answering
+    """
+
+    def __init__(self, in_dim: int, hidden_dim: int, num_layers: int = 3, nb_context: int = 4, nb_choices: int = 4):
+        self.single_input_size = in_dim // (nb_context + nb_choices)
+
+        super(MCQABayesClassifier, self).__init__(self.single_input_size, hidden_dim, hidden_dim, num_layers)
+        self.nb_context = nb_context
+        self.nb_choices = nb_choices
+
+        self.context_merger = torch.nn.Linear(hidden_dim * nb_context, hidden_dim)
+
+    def forward(self, x: torch.Tensor, eps_in: Optional[torch.Tensor] = None, eps_out: Optional[torch.Tensor] = None):
+        batch_size  = x.size(0)
+
+        # Compute embeddings of context and choices
+        x = x.view(-1, self.single_input_size) # [batch_size, (nb_context + nb_choices) * single_input_size] -> [batch_size *(nb_context + nb_choices), single_input_size]
+        x, fc_in_weights, fc_out_weights = super().forward(x, eps_in, eps_out)
+        x = x.view(batch_size, self.nb_context + self.nb_choices, self.hidden_dim) # [batch_size, (nb_context + nb_choices) * hidden_dim] -> [batch_size, nb_context + nb_choices, hidden_dim]
+
+        context = x[:, :self.nb_context,:] # [batch_size, nb_context, hidden_dim]
+        choices = x[:, self.nb_context:,:] # [batch_size, nb_choices, hidden_dim]
+
+        context = torch.nn.functional.silu(self.context_merger(context.view(batch_size, -1))) #  [batch_size, nb_context, hidden_dim] ->  [batch_size, hidden_dim]
+
+        # Normalise embeddings
+        context = context + torch.randn_like(context) * 1e-6 # Add eps*1e-6 to avoid division by zero
+        choices = choices + torch.randn_like(choices) * 1e-6
+        context = context / context.norm(dim=-1, keepdim=True)
+        choices = choices / choices.norm(dim=-1, keepdim=True)
+
+        # Compute scores
+        scores = (context.unsqueeze(1) @ choices.permute(0,2,1)).view(batch_size, self.nb_choices) # [batch_size, 1, hidden_dim] x [batch_size, hidden_dim, nb_choices] -> [batch_size, nb_choices]
+
+        return [scores, fc_in_weights, fc_out_weights]

@@ -1,14 +1,16 @@
 
-from .cbnn import CNN_CBNN
+from .cbnn import CNN_CBNN, MCQA_CNN_CBNN
 from .vae import CNNVAE, CNNVAEClassifier
-from .resnet import ResNet18
+from .resnet import ResNet18, MCQAResNet18
 
 
 MODELS = {
     'cbnn': CNN_CBNN,
+    'mcqa_cbnn': MCQA_CNN_CBNN,
     'vae': CNNVAE,
     'vae_classifier': CNNVAEClassifier,
     'resnet18': ResNet18,
+    'mcqa_resnet18': MCQAResNet18
 }
 
 def add_model_specific_args(parent_parser):

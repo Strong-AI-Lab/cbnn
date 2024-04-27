@@ -183,7 +183,7 @@ class ACREDataModule(BaseDataModule):
             # transforms_v2.Normalize((131.6699, 126.6359, 125.6257, 255.0000), (36.4253, 29.8901, 30.2831,  0.0001)),
             transforms_v2.Normalize((131.6699, 126.6359, 125.6257), (36.4253, 29.8901, 30.2831)), # Mean and std of the dataset based on the IID training set
             transforms_v2.Pad([0,40,0,40]), # [320x240] --> [320x320]
-            transforms_v2.Resize((224, 224)) # [320x320] --> [224x224]
+            transforms_v2.Resize((256, 256)) # [320x320] --> [256x256]
         ])
 
     def _build_image_tensor_sequence(self, image_files):
@@ -309,6 +309,7 @@ class RAVENDataModule(BaseDataModule):
             transforms.ToTensor(), # [0, 255] -> [0, 1]
             transforms_v2.ToDtype(torch.float32),
             transforms_v2.Normalize((0.8522,), (0.2990,)),
+            transforms_v2.Resize((128, 128)) # [160x160] --> [128x128]
         ])
 
         if mode == "inference":

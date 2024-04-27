@@ -30,7 +30,7 @@ gpus: null
 gradient_clip_algorithm: null
 gradient_clip_val: null
 ic_mi_weight: 0.0
-image_dim: 224
+image_dim: 256
 in_channels: 3
 inference_mode: true
 ipus: null

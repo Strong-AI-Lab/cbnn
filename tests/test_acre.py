@@ -29,17 +29,17 @@ class TestACREDataModule:
 
     def test_acre_next_train_gen(self, acre_gen):
         x_train, y_train = next(iter(acre_gen.train_dataloader()))
-        assert x_train.shape == (2, 3, 224, 224)
+        assert x_train.shape == (2, 3, 256, 256)
         assert y_train.shape == (2,)
 
     def test_acre_next_val_gen(self, acre_gen):
         x_val, y_val = next(iter(acre_gen.val_dataloader()))
-        assert x_val.shape == (2, 3, 224, 224)
+        assert x_val.shape == (2, 3, 256, 256)
         assert y_val.shape == (2,)
 
     def test_acre_next_test_gen(self, acre_gen):
         x_test, y_test = next(iter(acre_gen.test_dataloader()))
-        assert x_test.shape == (2, 3, 224, 224)
+        assert x_test.shape == (2, 3, 256, 256)
         assert y_test.shape == (2,)
 
     def test_acre_setup_infer(self, acr_infer):
@@ -49,27 +49,26 @@ class TestACREDataModule:
 
     def test_acre_next_train_infer(self, acr_infer):
         x_train, y_train = next(iter(acr_infer.train_dataloader()))
-        print(x_train.shape, y_train.shape)
-        assert x_train.shape == (2, 7, 3, 224, 224)
+        assert x_train.shape == (2, 7, 3, 256, 256)
         assert y_train.shape == (2,)
 
     def test_acre_next_val_infer(self, acr_infer):
         x_val, y_val = next(iter(acr_infer.val_dataloader()))
-        assert x_val.shape == (2, 7, 3, 224, 224)
+        assert x_val.shape == (2, 7, 3, 256, 256)
         assert y_val.shape == (2,)
 
     def test_acre_next_test_infer(self, acr_infer):
         x_test, y_test = next(iter(acr_infer.test_dataloader()))
-        assert x_test.shape == (2, 7, 3, 224, 224)
+        assert x_test.shape == (2, 7, 3, 256, 256)
         assert y_test.shape == (2,)
     
     def test_forward_gen(self, acre_gen):
         x = next(iter(acre_gen.train_dataloader()))[0]
-        vae = CNNVAE(in_channels=3, latent_dim=10, image_dim=224)
+        vae = CNNVAE(in_channels=3, latent_dim=10, image_dim=256)
         vae.eval()
         x_recon, x_input, z_mean, z_log_var = vae(x)
-        assert x_recon.shape == (2, 3, 224, 224)
-        assert x_input.shape == (2, 3, 224, 224)
+        assert x_recon.shape == (2, 3, 256, 256)
+        assert x_input.shape == (2, 3, 256, 256)
         assert z_mean.shape == (2, 10)
         assert z_log_var.shape == (2, 10)
         assert (x_input == x).all()

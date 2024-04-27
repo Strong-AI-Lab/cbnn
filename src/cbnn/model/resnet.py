@@ -75,3 +75,58 @@ class ResNet18(pl.LightningModule):
     
     def configure_optimizers(self):
         return torch.optim.AdamW(self.parameters(), lr=self.learning_rate, weight_decay=self.weight_decay)
+
+
+
+class MCQAResNet18(ResNet18):
+    def __init__(self, in_channels: int = 3, num_classes: int = 10, pretrained: bool = True, learning_rate : float = 0.005, weight_decay : float = 0.0, nb_input_images : int = 5, embedding_dim : int = 512, **kwargs):
+        super(MCQAResNet18, self).__init__(in_channels, embedding_dim, pretrained, learning_rate, weight_decay, **kwargs)
+        self.nb_input_images = nb_input_images
+        self.nb_context = nb_input_images - num_classes
+        self.nb_choices = num_classes
+        self.embedding_dim = embedding_dim
+
+        if self.nb_input_images < 2:
+            raise ValueError("The number of input images must be at least 2.")
+        
+        if self.nb_choices < 2:
+            raise ValueError("The number of choices must be at least 2.")
+        
+        if self.nb_context < 1:
+            raise ValueError("The number of context images must be at least 1.")
+        
+        if self.nb_context > 1: # If there is more than one context image, we need to merge them
+            self.context_merger = torch.nn.Linear(embedding_dim * self.nb_context, embedding_dim)
+    
+    def forward(self, x): # [batch_size, nb_images, channels, height, width]
+        batch_size = x.size(0)
+
+        # Compute embeddings of context and choices
+        x = x.view(batch_size * self.nb_input_images, *x.size()[2:]) # [batch_size, (nb_context + nb_choices), channels, height, width] -> [batch_size * (nb_context + nb_choices), channels, height, width]
+        x = super().forward(x) # [batch_size * (nb_context + nb_choices), channels, height, width] -> [batch_size * (nb_context + nb_choices), embedding_dim]
+        x = x.view(batch_size, self.nb_input_images, self.embedding_dim) # [batch_size, (nb_context + nb_choices) * embedding_dim] -> [batch_size, nb_context + nb_choices, embedding_dim]
+
+        context = x[:, :self.nb_context,:] # [batch_size, nb_context, embedding_dim]
+        choices = x[:, self.nb_context:,:] # [batch_size, nb_choices, embedding_dim]
+        
+        if self.nb_context > 1:
+            context = torch.nn.functional.leaky_relu(self.context_merger(context.view(batch_size, -1)))
+
+        # Normalise embeddings
+        context = context + torch.randn_like(context) * 1e-6 # Add eps*1e-6 to avoid division by zero
+        choices = choices + torch.randn_like(choices) * 1e-6
+        context = context / context.norm(dim=-1, keepdim=True)
+        choices = choices / choices.norm(dim=-1, keepdim=True)
+
+        # Compute scores
+        scores = (context.unsqueeze(1) @ choices.permute(0,2,1)).view(batch_size, self.nb_choices) # [batch_size, 1, embedding_dim] x [batch_size, embedding_dim, nb_choices] -> [batch_size, nb_choices]
+        return scores
+
+    
+    @classmethod
+    def add_model_specific_args(cls, parent_parser):
+        parent_parser = super(MCQAResNet18, cls).add_model_specific_args(parent_parser)
+        parser = parent_parser.add_argument_group("MCQAResNet18")
+        parser.add_argument('--nb_input_images', type=int, default=5, help='Number of input images (context + choices).')
+        parser.add_argument('--embedding_dim', type=int, default=512, help='Dimension of the embeddings before weighting of the choices.')
+        return parent_parser

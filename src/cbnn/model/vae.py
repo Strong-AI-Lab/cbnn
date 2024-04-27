@@ -27,7 +27,7 @@ class BaseVAE(pl.LightningModule):
         self.weight_decay = weight_decay
 
         self._init_modules(**kwargs)
-        self.save_hyperparameters(ignore=kwargs.keys())
+        self.save_hyperparameters()
 
 
     def _init_modules(self,**kwargs):
@@ -133,8 +133,6 @@ class CNNVAE(BaseVAE):
             
         self.decoder = CNNVariationalDecoder(latent_dim, in_channels, image_dim, hidden_dims)
 
-        self.save_hyperparameters(ignore=kwargs.keys())
-
     @classmethod
     def add_model_specific_args(cls, parent_parser):
         parent_parser = super(CNNVAE, cls).add_model_specific_args(parent_parser)
@@ -166,8 +164,6 @@ class CNNVAEClassifier(CNNVAE):
 
         # Build Classifier
         self.classifier = MLPClassifier(latent_dim, num_classes, latent_dim, num_inference_layers)
-
-        self.save_hyperparameters(ignore=kwargs.keys())
 
     @classmethod
     def add_model_specific_args(cls, parent_parser):

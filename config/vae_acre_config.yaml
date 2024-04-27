@@ -26,7 +26,7 @@ hidden_dims:
 - 128
 - 256
 - 512
-image_dim: 224
+image_dim: 256
 in_channels: 3
 inference_mode: true
 ipus: null

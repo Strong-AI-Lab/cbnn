@@ -66,13 +66,16 @@ class TestCNN_CBNN:
         y = torch.tensor([0, 1, 2, 3])
         x_recon, y_recon, w_samples, z_samples, context_z_samples, z_mean, z_log_var, context_z_mean, context_z_log_var = cbnn(x)
         loss = cbnn.loss_function(x, x_recon, y, y_recon, w_samples, z_samples, context_z_samples, z_mean, z_log_var, context_z_mean, context_z_log_var)
-        assert ["loss", "Inference_Loss", "Reconstruction_Loss", "Context_KLD", "KLD", "IC_MI", "Accuracy"] == list(loss.keys())
+        assert ["loss", "Inference_Loss", "Reconstruction_Loss", "Context_KLD", "Weights_KLD", "KLD", "IC_MI", "WC_MI", "Accuracy"] == list(loss.keys())
         assert loss["loss"] > 0
         assert loss["Inference_Loss"] > 0
         assert loss["Reconstruction_Loss"] > 0
         assert loss["Context_KLD"] < 0
+        assert loss["Weights_KLD"] < 0
         assert loss["KLD"] < 0
+        assert loss["IC_MI"] > 0
+        assert loss["WC_MI"] > 0
         assert loss["Accuracy"] >= 0.0
-        assert loss["loss"] == loss["Inference_Loss"] + cbnn.recon_weight * loss["Reconstruction_Loss"] - cbnn.context_kld_weight * loss["Context_KLD"] - cbnn.kld_weight * loss["KLD"] + cbnn.ic_mi_weight * loss["IC_MI"]
+        assert loss["loss"] == loss["Inference_Loss"] + cbnn.recon_weight * loss["Reconstruction_Loss"] - cbnn.context_kld_weight * loss["Context_KLD"] - cbnn.w_kld_weight * loss["Weights_KLD"] - cbnn.kld_weight * loss["KLD"] + cbnn.ic_mi_weight * loss["IC_MI"] + cbnn.wc_mi_weight * loss["WC_MI"]
 
     
