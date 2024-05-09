@@ -7,3 +7,4 @@ checkpoints/
 lightning_logs/
 nohup.out
 .pytest_cache/
+wandb/

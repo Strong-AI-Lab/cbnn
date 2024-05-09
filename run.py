@@ -1,4 +1,5 @@
 
+import os
 import argparse
 import yaml
 
@@ -6,7 +7,7 @@ from src.cbnn.data.datasets import DATASETS, BaseDataModule, get_dataset
 from src.cbnn.model.models import MODELS, get_model, add_model_specific_args
 
 import pytorch_lightning as pl
-from pytorch_lightning.loggers import WandbLogger
+from pytorch_lightning.loggers import WandbLogger, TensorBoardLogger
 
 
 def parse_args():
@@ -71,7 +72,7 @@ def main(args, callbacks=None):
     pl.seed_everything(42, workers=True)
     trainer = pl.Trainer.from_argparse_args(
         args,
-        logger=WandbLogger(name=f"{args.model}_train", project=args.wandb_project) if args.wandb_project else True,
+        logger=[TensorBoardLogger(save_dir=os.getcwd(), version=1, name="lightning_logs")] + ([WandbLogger(name=f"{args.model}_train", project=args.wandb_project)] if args.wandb_project else []),
         callbacks = callbacks
     )
 
