@@ -60,6 +60,13 @@ class CBNN(pl.LightningModule):
         self.learning_rate = learning_rate
         self.weight_decay = weight_decay
 
+        # Context loader
+        self.context_distrib_loader_funcs = {
+            "train" : None,
+            "val" : None,
+            "test" : None
+        }
+
         self._init_modules(**kwargs)
         self.save_hyperparameters()
 
@@ -132,12 +139,10 @@ class CBNN(pl.LightningModule):
             x = x.view(-1, *x.size()[-3:])
             x_context = [x_c.view(-1, *x_c.size()[-3:]) for x_c in x_context]
         
-        context_mus = []
-        context_log_vars = []
-        for x_c in x_context:
-            mu_c, log_var_c = context_encoder(x_c)
-            context_mus.append(mu_c)
-            context_log_vars.append(log_var_c)
+        x_c = torch.cat(x_context) # concat context inputs at batch size for the encoding step
+        mu_c, log_var_c = context_encoder(x_c)
+        context_mus = [mu_c[i:i+batch_size] for i in range(self.z_samples)]
+        context_log_vars = [log_var_c[i:i+batch_size] for i in range(self.z_samples)]
 
         inference_mu, inference_log_var = inference_encoder(x)
 
@@ -167,7 +172,7 @@ class CBNN(pl.LightningModule):
                 context_log_var = context_log_vars[c_idx]
 
 
-            if self.inference_without_encoder: # mu, log_var do not exist! (are dummy values)
+            if self.inference_without_encoder: # mu, log_var do not exist (values are not filled)
                 z = x.view(x_shape)
                 context_z = self.sample(context_mu, context_log_var)
             else:
@@ -308,15 +313,9 @@ class CBNN(pl.LightningModule):
                 'Accuracy':self.accuracy(y_recon, y_target).detach()
                 }
     
+
     def _sample_context_from_distribution(self, split = "train"):
-        if split == "train":
-            dataloader = self.trainer.datamodule.train_dataloader()
-        elif split == "val":
-            dataloader = self.trainer.datamodule.val_dataloader()
-        elif split == "test":
-            dataloader = self.trainer.datamodule.test_dataloader()
-        else:
-            raise ValueError(f"Invalid split: {split}. Must be one of 'train', 'val', 'test'.")
+        dataloader = self.context_distrib_loader_funcs[split]()
         
         context_list = []
         for _ in range(self.z_samples):
@@ -324,14 +323,22 @@ class CBNN(pl.LightningModule):
             context_list.append(x_context)
         self.pre_load_context(context_list)
 
+    def on_fit_start(self):
+        self.context_distrib_loader_funcs["train"] = self.trainer.datamodule.train_dataloader
+        self.context_distrib_loader_funcs["val"] = self.trainer.datamodule.val_dataloader
+        self.context_distrib_loader_funcs["test"] = self.trainer.datamodule.test_dataloader
+    
+    def on_predict_start(self):
+        self.context_distrib_loader_funcs["train"] = self.trainer.datamodule.train_dataloader
+        self.context_distrib_loader_funcs["val"] = self.trainer.datamodule.val_dataloader
+        self.context_distrib_loader_funcs["test"] = self.trainer.datamodule.test_dataloader
+
+
     def training_step(self, batch, batch_idx):
         if self.sample_context_from_distribution:
             self._sample_context_from_distribution(split="train")
 
-        if self.loaded_context:
-            x_context = self.x_context
-        else:
-            x_context = None
+        x_context = self.x_context
 
         x, y = batch
         x_recons, y_recon, *outputs = self(x, x_context)
@@ -346,10 +353,7 @@ class CBNN(pl.LightningModule):
         if self.sample_context_from_distribution:
             self._sample_context_from_distribution(split="val")
 
-        if self.loaded_context:
-            x_context = self.x_context
-        else:
-            x_context = None
+        x_context = self.x_context
 
         x, y = batch
         x_recons, y_recon, *outputs = self(x, x_context)
@@ -367,10 +371,7 @@ class CBNN(pl.LightningModule):
         if self.sample_context_from_distribution:
             self._sample_context_from_distribution(split="test")
 
-        if self.loaded_context:
-            x_context = self.x_context
-        else:
-            x_context = None
+        x_context = self.x_context
 
         x, y = batch
         x_recons, y_recon, *outputs = self(x, x_context)
