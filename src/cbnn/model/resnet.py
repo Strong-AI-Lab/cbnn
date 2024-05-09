@@ -26,7 +26,6 @@ class ResNet18(pl.LightningModule):
         if x.shape[1] == 1:
             x = x.repeat(1, 3, 1, 1)
 
-
         # Process the input
         return self.resnet(x)
     

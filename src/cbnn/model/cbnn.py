@@ -4,6 +4,7 @@ from typing import Optional, List
 from .modules.encoders import CNNVariationalEncoder
 from .modules.decoders import CNNVariationalDecoder
 from .modules.classifiers import BayesianClassifier, MCQABayesClassifier
+from .modules.bayes_resnet_utils import bayes_resnet18_invariant, mcqa_bayes_resnet18_invariant
 from ..trainer.losses import normal_kullback_leibler_divergence, gaussian_mutual_information
 from .utils import sample_images
 
@@ -28,6 +29,9 @@ class CBNN(pl.LightningModule):
             wc_mi_weight : float = 1.0,
             learning_rate : float = 0.005, 
             weight_decay : float = 0.0,
+            inverse_context : bool = False,
+            inference_without_encoder : bool = False,
+            sample_context_from_distribution : bool = False,
             **kwargs
             ):
         super(CBNN, self).__init__()
@@ -42,7 +46,9 @@ class CBNN(pl.LightningModule):
         self.z_samples = z_samples
         self.w_samples = w_samples
         self.nb_input_images = nb_input_images
-        self.loaded_context = False
+        self.inverse_context = inverse_context
+        self.inference_without_encoder = inference_without_encoder
+        self.sample_context_from_distribution = sample_context_from_distribution
 
         # Loss weights
         self.recon_weight = recon_weight
@@ -76,16 +82,20 @@ class CBNN(pl.LightningModule):
         parser.add_argument('--wc_mi_weight', type=float, default=1.0, help='Weight of the Weights-Context Mutual Information loss.')
         parser.add_argument('--learning_rate', type=float, default=0.005, help='Learning rate for the optimizer.')
         parser.add_argument('--weight_decay', type=float, default=0.0, help='Weight decay for the optimizer.')
+        parser.add_argument('--inverse_context', action='store_true', help='Switch context and inference encoders to be reflect the theoretical groundings.')
+        parser.add_argument('--inference_without_encoder', action='store_true', help='Use when the inference network is a single decoder module and does not require an encoder.')
+        parser.add_argument('--sample_context_from_distribution', action='store_true', help='Sample context from the distribution. If false, use the input as context')
 
         return parent_parser
 
+    @property
+    def loaded_context(self):
+        return self.x_context is not None
 
     def pre_load_context(self, x_context: List[torch.Tensor]):
-        self.loaded_context = True
         self.x_context = x_context
 
     def clear_context(self):
-        self.loaded_context = False
         self.x_context = None
 
 
@@ -96,38 +106,47 @@ class CBNN(pl.LightningModule):
 
     
     def forward(self, x: torch.Tensor, x_context: Optional[List[torch.Tensor]] = None, **kwargs):
-        batch_size = x.size(0)
+        x_shape = x.size()
+        batch_size = x_shape[0]
+
+        if x_context is None:
+            x_context = [x]
+
+        if self.inference_without_encoder:
+            inference_encoding_func = lambda x: (torch.zeros(batch_size * self.nb_input_images, 1), torch.ones(batch_size * self.nb_input_images, 1))
+        else:
+            inference_encoding_func = self.inference_encoder
+
+        if self.inverse_context:
+            context_encoder = inference_encoding_func
+            inference_encoder = self.context_encoder
+        else:
+            context_encoder = self.context_encoder
+            inference_encoder = inference_encoding_func
+
 
         if self.nb_input_images > 1:
             assert len(x.size()) > 4, f"Input tensor must have at least 5 dimensions when nb_input_images is > 1: (batch, nb_input_images, channels, height, width). Got {len(x.size())} dimensions: {x.size()}"
             assert x.size(-4) == self.nb_input_images, f"Input tensor must have the same number of images as specified by nb_input_images. Got {x.size(-4)} images ({x.size()}), expected {self.nb_input_images}."
 
             x = x.view(-1, *x.size()[-3:])
-            if x_context is not None:
-                x_context = [x_c.view(-1, *x_c.size()[-3:]) for x_c in x_context]
+            x_context = [x_c.view(-1, *x_c.size()[-3:]) for x_c in x_context]
+        
+        context_mus = []
+        context_log_vars = []
+        for x_c in x_context:
+            mu_c, log_var_c = context_encoder(x_c)
+            context_mus.append(mu_c)
+            context_log_vars.append(log_var_c)
 
-        if x_context is None:
-            context_mu, context_log_var = self.context_encoder(x)
-        else:
-            context_mus = []
-            context_log_vars = []
-            for x_c in x_context:
-                mu_c, log_var_c = self.context_encoder(x_c)
-                context_mus.append(mu_c)
-                context_log_vars.append(log_var_c)
-
-        mu, log_var = self.inference_encoder(x)
+        inference_mu, inference_log_var = inference_encoder(x)
 
         if self.nb_input_images > 1:
-            mu = mu.view(batch_size, self.nb_input_images * mu.size(-1))
-            log_var = log_var.view(batch_size, self.nb_input_images * log_var.size(-1))
+            inference_mu = inference_mu.view(batch_size, self.nb_input_images * inference_mu.size(-1))
+            inference_log_var = inference_log_var.view(batch_size, self.nb_input_images * inference_log_var.size(-1))
 
-            if x_context is None:
-                context_mu = context_mu.view(batch_size, self.nb_input_images * context_mu.size(-1))
-                context_log_var = context_log_var.view(batch_size, self.nb_input_images * context_log_var.size(-1))
-            else:
-                context_mus = [mu.view(batch_size, self.nb_input_images * mu.size(-1)) for mu in context_mus]
-                context_log_vars = [log_var.view(batch_size, self.nb_input_images * log_var.size(-1)) for log_var in context_log_vars]
+            context_mus = [c_mu.view(batch_size, self.nb_input_images * c_mu.size(-1)) for c_mu in context_mus]
+            context_log_vars = [c_log_var.view(batch_size, self.nb_input_images * c_log_var.size(-1)) for c_log_var in context_log_vars]
 
         x_recons = []
         ys = []
@@ -135,12 +154,27 @@ class CBNN(pl.LightningModule):
         context_zs = []
         zs = []
         for i in range(self.z_samples):
-            if x_context is not None:
-                context_mu = context_mus[i]
-                context_log_var = context_log_vars[i]
+            c_idx = i if i < len(context_mus) else -1
+            if self.inverse_context:
+                mu = context_mus[c_idx]
+                log_var = context_log_vars[c_idx]
+                context_mu = inference_mu
+                context_log_var = inference_log_var
+            else:
+                mu = inference_mu
+                log_var = inference_log_var
+                context_mu = context_mus[c_idx]
+                context_log_var = context_log_vars[c_idx]
 
-            context_z = self.sample(context_mu, context_log_var)
-            z = self.sample(mu, log_var)
+
+            if self.inference_without_encoder: # mu, log_var do not exist! (are dummy values)
+                z = x.view(x_shape)
+                context_z = self.sample(context_mu, context_log_var)
+            else:
+                context_z = self.sample(context_mu, context_log_var)
+                z = self.sample(mu, log_var)
+
+
             context_zs.append(context_z)
             zs.append(z)
 
@@ -154,17 +188,19 @@ class CBNN(pl.LightningModule):
             x_recons.append(x_recon)
 
             for _ in range(self.w_samples):
-                y_j, *w_j = self.inference_classifier(torch.cat([z, context_z], dim=-1))
+                try:
+                    infer_inputs = [torch.cat([z, context_z], dim=-1)]
+                except RuntimeError:
+                    infer_inputs = [z, context_z]
+
+                y_j, *w_j = self.inference_classifier(*infer_inputs)
                 ys.append(y_j)
                 ws.append(torch.cat([w.view(-1) for w in w_j], dim=0))
 
         y = torch.stack(ys).mean(dim=0)
 
-        outputs = [x_recons, y, ws, zs, context_zs, mu, log_var]
-        if x_context is None:
-            outputs.extend([[context_mu], [context_log_var]])
-        else:
-            outputs.extend([context_mus, context_log_vars])
+        outputs = [x_recons, y, ws, zs, context_zs, inference_mu, inference_log_var]
+        outputs.extend([context_mus, context_log_vars])
 
         return outputs
     
@@ -272,8 +308,26 @@ class CBNN(pl.LightningModule):
                 'Accuracy':self.accuracy(y_recon, y_target).detach()
                 }
     
+    def _sample_context_from_distribution(self, split = "train"):
+        if split == "train":
+            dataloader = self.trainer.datamodule.train_dataloader()
+        elif split == "val":
+            dataloader = self.trainer.datamodule.val_dataloader()
+        elif split == "test":
+            dataloader = self.trainer.datamodule.test_dataloader()
+        else:
+            raise ValueError(f"Invalid split: {split}. Must be one of 'train', 'val', 'test'.")
+        
+        context_list = []
+        for _ in range(self.z_samples):
+            x_context, _ = next(iter(dataloader))
+            context_list.append(x_context)
+        self.pre_load_context(context_list)
 
     def training_step(self, batch, batch_idx):
+        if self.sample_context_from_distribution:
+            self._sample_context_from_distribution(split="train")
+
         if self.loaded_context:
             x_context = self.x_context
         else:
@@ -289,6 +343,9 @@ class CBNN(pl.LightningModule):
         return losses['train_loss']
     
     def validation_step(self, batch, batch_idx):
+        if self.sample_context_from_distribution:
+            self._sample_context_from_distribution(split="val")
+
         if self.loaded_context:
             x_context = self.x_context
         else:
@@ -307,6 +364,9 @@ class CBNN(pl.LightningModule):
         self.sample_images()
     
     def test_step(self, batch, batch_idx):
+        if self.sample_context_from_distribution:
+            self._sample_context_from_distribution(split="test")
+
         if self.loaded_context:
             x_context = self.x_context
         else:
@@ -400,5 +460,83 @@ class MCQA_CNN_CBNN(CBNN):
         parser.add_argument('--encoder_hidden_dims', type=int, nargs='+', default=[32, 64, 128, 256, 512], help='Hidden dimensions for the encoder.')
         parser.add_argument('--classifier_hidden_dim', type=int, default=128, help='Hidden dimension for the classifier.')
         parser.add_argument('--classifier_nb_layers', type=int, default=3, help='Number of layers for the classifier.')
+        
+        return parent_parser
+    
+
+
+
+class ResNet_CBNN(CBNN):
+    def __init__(self, **kwargs):
+        if 'inference_without_encoder' in kwargs:
+            kwargs.pop('inference_without_encoder')
+        super(ResNet_CBNN, self).__init__(inference_without_encoder=True, **kwargs)
+
+
+    def _init_modules(self,
+            in_channels: int = 3,
+            image_dim: int = 64,
+            num_classes: int = 10,
+            latent_dim: int = 256,
+            encoder_hidden_dims: List = None,
+            **kwargs):
+        
+        self.latent_dim = latent_dim
+        
+        # Build modules
+        self.context_encoder = CNNVariationalEncoder(in_channels, image_dim, latent_dim, encoder_hidden_dims)
+        self.context_decoder = CNNVariationalDecoder(latent_dim, in_channels, image_dim, encoder_hidden_dims[::-1] if encoder_hidden_dims is not None else None)
+        self.inference_encoder = None
+        self.inference_classifier = bayes_resnet18_invariant(in_channels, num_classes, latent_dim, image_size=image_dim)
+    
+    @classmethod
+    def add_model_specific_args(cls, parent_parser):
+        parent_parser = super(ResNet_CBNN, cls).add_model_specific_args(parent_parser)
+
+        parser = parent_parser.add_argument_group("ResNet_CBNN")
+        parser.add_argument('--in_channels', type=int, default=3, help='Number of input channels.')
+        parser.add_argument('--image_dim', type=int, default=64, help='Dimension of the input image. Image is assumed to be square.')
+        parser.add_argument('--num_classes', type=int, default=10, help='Number of classes in the dataset.')
+        parser.add_argument('--latent_dim', type=int, default=256, help='Dimension of the latent space.')
+        parser.add_argument('--encoder_hidden_dims', type=int, nargs='+', default=[32, 64, 128, 256, 512], help='Hidden dimensions for the encoder.')
+        
+        return parent_parser
+
+
+
+
+class MCQA_ResNet_CBNN(CBNN):
+    def __init__(self, **kwargs):
+        if 'inference_without_encoder' in kwargs:
+            kwargs.pop('inference_without_encoder')
+        super(MCQA_ResNet_CBNN, self).__init__(inference_without_encoder=True, **kwargs)
+
+
+    def _init_modules(self,
+            in_channels: int = 3,
+            image_dim: int = 64,
+            num_classes: int = 10,
+            latent_dim: int = 256,
+            encoder_hidden_dims: List = None,
+            **kwargs):
+        
+        self.latent_dim = latent_dim
+        
+        # Build modules
+        self.context_encoder = CNNVariationalEncoder(in_channels, image_dim, latent_dim, encoder_hidden_dims)
+        self.context_decoder = CNNVariationalDecoder(latent_dim, in_channels, image_dim, encoder_hidden_dims[::-1] if encoder_hidden_dims is not None else None)
+        self.inference_encoder = None
+        self.inference_classifier = mcqa_bayes_resnet18_invariant(in_channels, self.nb_input_images, latent_dim, num_classes, latent_dim, image_size=image_dim)
+    
+    @classmethod
+    def add_model_specific_args(cls, parent_parser):
+        parent_parser = super(MCQA_ResNet_CBNN, cls).add_model_specific_args(parent_parser)
+
+        parser = parent_parser.add_argument_group("MCQA_ResNet_CBNN")
+        parser.add_argument('--in_channels', type=int, default=3, help='Number of input channels.')
+        parser.add_argument('--image_dim', type=int, default=64, help='Dimension of the input image. Image is assumed to be square.')
+        parser.add_argument('--num_classes', type=int, default=10, help='Number of classes in the dataset.')
+        parser.add_argument('--latent_dim', type=int, default=256, help='Dimension of the latent space.')
+        parser.add_argument('--encoder_hidden_dims', type=int, nargs='+', default=[32, 64, 128, 256, 512], help='Hidden dimensions for the encoder.')
         
         return parent_parser

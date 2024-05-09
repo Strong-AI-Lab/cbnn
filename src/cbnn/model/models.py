@@ -1,5 +1,5 @@
 
-from .cbnn import CNN_CBNN, MCQA_CNN_CBNN
+from .cbnn import CNN_CBNN, MCQA_CNN_CBNN, ResNet_CBNN, MCQA_ResNet_CBNN
 from .vae import CNNVAE, CNNVAEClassifier
 from .resnet import ResNet18, MCQAResNet18
 
@@ -7,6 +7,8 @@ from .resnet import ResNet18, MCQAResNet18
 MODELS = {
     'cbnn': CNN_CBNN,
     'mcqa_cbnn': MCQA_CNN_CBNN,
+    'cbresnet': ResNet_CBNN,
+    'mcqa_cbresnet': MCQA_ResNet_CBNN,
     'vae': CNNVAE,
     'vae_classifier': CNNVAEClassifier,
     'resnet18': ResNet18,
