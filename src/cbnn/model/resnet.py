@@ -1,3 +1,4 @@
+from typing import List, Optional
 
 import pytorch_lightning as pl
 import torchvision.models as models
@@ -5,7 +6,7 @@ import torch
 
 
 class ResNet18(pl.LightningModule):
-    def __init__(self, in_channels: int = 3, num_classes: int = 10, pretrained: bool = True, learning_rate : float = 0.005, weight_decay : float = 0.0, **kwargs):
+    def __init__(self, in_channels: int = 3, num_classes: int = 10, pretrained: bool = True, learning_rate : float = 0.005, weight_decay : float = 0.0, freeze_parameters : Optional[List[str]] = None, reverse_freeze : bool = False, **kwargs):
         super(ResNet18, self).__init__()
         self.in_channels = in_channels
         self.num_classes = num_classes
@@ -18,6 +19,10 @@ class ResNet18(pl.LightningModule):
             self.resnet.fc = torch.nn.Linear(self.resnet.fc.in_features, num_classes) # Change the output layer to match the number of classes
         if in_channels > 3 or in_channels == 2:
             self.resnet.conv1 = torch.nn.Conv2d(in_channels, 64, kernel_size=(7, 7), stride=(2, 2), padding=(3, 3), bias=False) # Change the input layer to match the number of channels (no modifications needed if 3 channels; if 1 channel, repeat the channels during forward pass)
+
+        # Freeze parameters
+        if freeze_parameters is not None:
+            self.partial_freeze(freeze_parameters, reverse=reverse_freeze)
 
         self.save_hyperparameters()
 
@@ -51,7 +56,7 @@ class ResNet18(pl.LightningModule):
         loss = self.loss_function(logits, y)
         acc = self.accuracy(logits, y)
         self.log('train_loss', loss)
-        self.log('train_acc', acc)
+        self.log('train_Accuracy', acc)
         return loss
     
     def validation_step(self, batch, batch_idx):
@@ -60,7 +65,7 @@ class ResNet18(pl.LightningModule):
         loss = self.loss_function(logits, y)
         acc = self.accuracy(logits, y)
         self.log('val_loss', loss)
-        self.log('val_acc', acc)
+        self.log('val_Accuracy', acc)
         return loss
     
     def test_step(self, batch, batch_idx):
@@ -69,11 +74,16 @@ class ResNet18(pl.LightningModule):
         loss = self.loss_function(logits, y)
         acc = self.accuracy(logits, y)
         self.log('test_loss', loss)
-        self.log('test_acc', acc)
+        self.log('test_Accuracy', acc)
         return loss
     
     def configure_optimizers(self):
         return torch.optim.AdamW(self.parameters(), lr=self.learning_rate, weight_decay=self.weight_decay)
+
+    def partial_freeze(self, frozen_layers : List[str], reverse : bool = False):
+        for name, param in self.named_parameters():
+            if (name in frozen_layers and not reverse) or (name not in frozen_layers and reverse):
+                param.requires_grad_(False)
 
 
 
@@ -103,7 +113,7 @@ class MCQAResNet18(ResNet18):
         # Compute embeddings of context and choices
         x = x.view(batch_size * self.nb_input_images, *x.size()[2:]) # [batch_size, (nb_context + nb_choices), channels, height, width] -> [batch_size * (nb_context + nb_choices), channels, height, width]
         x = super().forward(x) # [batch_size * (nb_context + nb_choices), channels, height, width] -> [batch_size * (nb_context + nb_choices), embedding_dim]
-        x = x.view(batch_size, self.nb_input_images, self.embedding_dim) # [batch_size, (nb_context + nb_choices) * embedding_dim] -> [batch_size, nb_context + nb_choices, embedding_dim]
+        x = x.view(batch_size, self.nb_input_images, self.embedding_dim) # [batch_size * (nb_context + nb_choices), embedding_dim] -> [batch_size, nb_context + nb_choices, embedding_dim]
 
         context = x[:, :self.nb_context,:] # [batch_size, nb_context, embedding_dim]
         choices = x[:, self.nb_context:,:] # [batch_size, nb_choices, embedding_dim]
