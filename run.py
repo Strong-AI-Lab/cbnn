@@ -60,8 +60,8 @@ def main(args, callbacks=None):
     
     model = get_model(args.model, **vars(args))
 
-    if args.save is not None:
-        model.load_from_checkpoint(args.save)
+    if args.save is not None: # Load saved model
+        model = type(model).load_from_checkpoint(args.save, **vars(args))
 
 
     # Load data (train, val, and test sets are loaded upon calling fit or test methods in the trainer)
@@ -72,7 +72,7 @@ def main(args, callbacks=None):
     pl.seed_everything(42, workers=True)
     trainer = pl.Trainer.from_argparse_args(
         args,
-        logger=[TensorBoardLogger(save_dir=os.getcwd(), version=1, name="lightning_logs")] + ([WandbLogger(name=f"{args.model}_train", project=args.wandb_project)] if args.wandb_project else []),
+        logger=[TensorBoardLogger(save_dir=os.getcwd(), name="lightning_logs")] + ([WandbLogger(name=f"{args.model}_{args.data}", project=args.wandb_project)] if args.wandb_project else []),
         callbacks = callbacks
     )
 

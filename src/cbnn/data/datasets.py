@@ -1,7 +1,7 @@
 
 import os
 import json
-from typing import Optional
+from typing import Optional, Callable, Any
 import numpy as np
 import requests
 import tqdm
@@ -19,11 +19,23 @@ DEFAULT_SAVE_DIR = "./data/"
 
 # Utils
 class BaseDataset(data_utils.Dataset):
-    def __init__(self, x, y, x_transform=None, y_transform=None):
+    def __init__(self, x : Any, y : Any, x_transform : Callable = None, y_transform : Callable = None, pre_transform : bool = False):
         self.x = x
         self.y = y
         self.x_transform = x_transform
         self.y_transform = y_transform
+        self.pre_transform = pre_transform
+
+        if self.pre_transform:
+            tx = []
+            ty = []
+            fx = self.x_transform if self.x_transform else lambda a : a
+            fy = self.y_transform if self.y_transform else lambda b : b
+            for i in tqdm.trange(len(self.x), desc="Pre-transforming data"):
+                tx.append(fx(self.x[i]))
+                ty.append(fy(self.y[i]))
+            self.x = torch.stack(tx)
+            self.y = torch.stack(ty)
 
     def __len__(self):
         return len(self.y)
@@ -41,7 +53,16 @@ class BaseDataset(data_utils.Dataset):
         return x, y
 
 class BaseDataModule(pl.LightningDataModule):
-    def __init__(self, data_dir: str = DEFAULT_SAVE_DIR, split: Optional[str] = None, mode: str = "inference", batch_size: int = 32, num_workers: int = 4, train_val_split: int = DEFAULT_VALIDATION_SPLIT, **kwargs):
+    def __init__(self, 
+                data_dir: str = DEFAULT_SAVE_DIR, 
+                split: Optional[str] = None, 
+                mode: str = "inference", 
+                batch_size: int = 32, 
+                num_workers: int = 4, 
+                train_val_split: int = DEFAULT_VALIDATION_SPLIT, 
+                pre_transform : bool = False,
+                subset_prop : float = 1.0,
+                **kwargs):
         super(BaseDataModule, self).__init__()        
         self.data_dir = data_dir
         self.distribution_split = split
@@ -52,10 +73,22 @@ class BaseDataModule(pl.LightningDataModule):
         self.test_data = []
         self.train_data = []
         self.val_data = []
+        self.pre_transform = pre_transform
+        self.subset_prop = subset_prop
 
     def _split_train_val_data(self, data):
         train, val = data_utils.random_split(data, [int(len(data) * (1 - self.train_val_split)), int(len(data) * self.train_val_split)])
         return train, val
+    
+    def _subset_data(self, train : bool = True, val : bool = False, test : bool = False):
+        if self.subset_prop < 1.0:
+            if train:
+                self.train_data = data_utils.Subset(self.train_data, np.random.choice(len(self.train_data), int(len(self.train_data) * self.subset_prop), replace=False))
+            if val:
+                self.val_data = data_utils.Subset(self.val_data, np.random.choice(len(self.val_data), int(len(self.val_data) * self.subset_prop), replace=False))
+            if test:
+                self.test_data = data_utils.Subset(self.test_data, np.random.choice(len(self.test_data), int(len(self.test_data) * self.subset_prop), replace=False))
+
     
     @classmethod
     def add_data_specific_args(cls, parent_parser):
@@ -66,6 +99,8 @@ class BaseDataModule(pl.LightningDataModule):
         parser.add_argument("--train_val_split", type=float, default=DEFAULT_VALIDATION_SPLIT, help="Optional. Validation split fraction. Is used for datasets with no validation set provided.")
         parser.add_argument("--split", type=str, default=None, help="Optional. Split of the dataset to use if the dataset contains multiple splits (e.g. i.i.d and o.o.d).")
         parser.add_argument("--mode", type=str, default="inference", help="Optional. Mode of the data module (inference/generation). Used only if the dataset contains multiple images per input. In inference mode, an extra dimension is added to the input to represent the sequence of images. In generation mode, the input is a single image and the output is an auxiliary task requiring a single image.")
+        parser.add_argument("--pre_transform", action="store_true", help="Optional. If applicable and specified, the data is pre-transformed during initialization. it speeds up training for datasets with time-intensive transformations for a larger memory use.")
+        parser.add_argument("--subset_prop", type=float, default=1.0, help="Optional. Proportion of the dataset to use. If specified, the dataset is subsetted to the specified proportion.")
         return parent_parser
 
     def prepare_data(self):
@@ -88,8 +123,8 @@ class BaseDataModule(pl.LightningDataModule):
 
 # Data Modules
 class MNISTDataModule(BaseDataModule):
-    def __init__(self, data_dir: str = DEFAULT_SAVE_DIR, split: Optional[str] = None, mode: str = "inference", batch_size: int = 32, num_workers: int = 4, train_val_split: int = DEFAULT_VALIDATION_SPLIT, **kwargs):
-        super(MNISTDataModule, self).__init__(data_dir, split, mode, batch_size, num_workers, train_val_split, **kwargs)
+    def __init__(self, **kwargs):
+        super(MNISTDataModule, self).__init__(**kwargs)
         self.transform = transforms.Compose([
             transforms.ToTensor(),
             transforms.Pad(2),
@@ -105,14 +140,17 @@ class MNISTDataModule(BaseDataModule):
         if stage == "fit":
             train = datasets.MNIST(self.data_dir, train=True, transform=self.transform)
             self.train_data, self.val_data = self._split_train_val_data(train)
+            self._subset_data(train=True, val=True)
         elif stage == "test":
             self.test_data = datasets.MNIST(self.data_dir, train=False, transform=self.transform)
 
 
 
+
+
 class MNISTOODDataModule(MNISTDataModule):
-    def __init__(self, data_dir: str = DEFAULT_SAVE_DIR, split: Optional[str] = None, mode: str = "inference", batch_size: int = 32, num_workers: int = 4, train_val_split: int = DEFAULT_VALIDATION_SPLIT, **kwargs):
-        super(MNISTOODDataModule, self).__init__(data_dir, split, mode, batch_size, num_workers, train_val_split, **kwargs)
+    def __init__(self, **kwargs):
+        super(MNISTOODDataModule, self).__init__(**kwargs)
         self.transform_shift = transforms.Compose([
             transforms.RandomAffine(0, translate=(0.1, 0.1)),
             transforms.ToTensor(),
@@ -122,16 +160,17 @@ class MNISTOODDataModule(MNISTDataModule):
 
     def setup(self, stage=None):
         if stage == "fit":
-            train = datasets.MNIST(self.data_dir, train=True, transform=self.transform)
+            train = datasets.MNIST(self.data_dir, train=True, transform=self.transform_shift)
             self.train_data, self.val_data = self._split_train_val_data(train)
+            self._subset_data(train=True, val=True)
         elif stage == "test":
             self.test_data = datasets.MNIST(self.data_dir, train=False, transform=self.transform_shift)
 
 
 
 class CIFAR10DataModule(BaseDataModule):
-    def __init__(self, data_dir: str = DEFAULT_SAVE_DIR, split: Optional[str] = None, mode: str = "inference", batch_size: int = 32, num_workers: int = 4, train_val_split: int = DEFAULT_VALIDATION_SPLIT, **kwargs):
-        super(CIFAR10DataModule, self).__init__(data_dir, split, mode, batch_size, num_workers, train_val_split, **kwargs)
+    def __init__(self, **kwargs):
+        super(CIFAR10DataModule, self).__init__(**kwargs)
         self.transform = transforms.Compose([
             transforms.ToTensor(),
             transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5))
@@ -146,14 +185,15 @@ class CIFAR10DataModule(BaseDataModule):
         if stage == "fit":
             train = datasets.CIFAR10(self.data_dir, train=True, transform=self.transform)
             self.train_data, self.val_data = self._split_train_val_data(train)
+            self._subset_data(train=True, val=True)
         elif stage == "test":
             self.test_data = datasets.CIFAR10(self.data_dir, train=False, transform=self.transform)
 
 
 
 class CIFAR10OODDataModule(CIFAR10DataModule):
-    def __init__(self, data_dir: str = DEFAULT_SAVE_DIR, split: Optional[str] = None, mode: str = "inference", batch_size: int = 32, num_workers: int = 4, train_val_split: int = DEFAULT_VALIDATION_SPLIT, **kwargs):
-        super(CIFAR10OODDataModule, self).__init__(data_dir, split, mode, batch_size, num_workers, train_val_split, **kwargs)
+    def __init__(self, **kwargs):
+        super(CIFAR10OODDataModule, self).__init__(**kwargs)
         self.transform_shift = transforms.Compose([
             transforms.RandomAffine(0, translate=(0.1, 0.1)),
             transforms.ToTensor(),
@@ -162,8 +202,9 @@ class CIFAR10OODDataModule(CIFAR10DataModule):
 
     def setup(self, stage=None):
         if stage == "fit":
-            train = datasets.CIFAR10(self.data_dir, train=True, transform=self.transform)
+            train = datasets.CIFAR10(self.data_dir, train=True, transform=self.transform_shift)
             self.train_data, self.val_data = self._split_train_val_data(train)
+            self._subset_data(train=True, val=True)
         elif stage == "test":
             self.test_data = datasets.CIFAR10(self.data_dir, train=False, transform=self.transform_shift)
 
@@ -171,11 +212,11 @@ class CIFAR10OODDataModule(CIFAR10DataModule):
 
 class ACREDataModule(BaseDataModule):
 
-    def __init__(self, data_dir: str = DEFAULT_SAVE_DIR, split: Optional[str] = None, mode: str = "inference", batch_size: int = 32, num_workers: int = 4, train_val_split: int = DEFAULT_VALIDATION_SPLIT, **kwargs):
+    def __init__(self, data_dir: str = DEFAULT_SAVE_DIR, split: Optional[str] = None, **kwargs):
         if split is not None:
             data_dir = os.path.join(data_dir, split)
 
-        super(ACREDataModule, self).__init__(data_dir, split, mode, batch_size, num_workers, train_val_split, **kwargs)
+        super(ACREDataModule, self).__init__(data_dir, split, **kwargs)
         self.load_image_tensor = transforms.Compose([
             io.read_image, # directly return Tensors in range [0,255] so we normalize from this range
             transforms_v2.Lambda(lambda x: x[..., :3,:,:]), # Remove alpha channel
@@ -185,11 +226,19 @@ class ACREDataModule(BaseDataModule):
             transforms_v2.Pad([0,40,0,40]), # [320x240] --> [320x320]
             transforms_v2.Resize((256, 256)) # [320x320] --> [256x256]
         ])
+        self.transform_only = transforms.Compose(self.load_image_tensor.transforms[1:])
 
     def _build_image_tensor_sequence(self, image_files):
         image_sequence = []
         for image_file in image_files:
             image = self.load_image_tensor(image_file)
+            image_sequence.append(image)
+        return torch.stack(image_sequence)
+
+    def _transform_sequence_only(self, images):
+        image_sequence = []
+        for image in images:
+            image = self.transform_only(image)
             image_sequence.append(image)
         return torch.stack(image_sequence)
 
@@ -238,14 +287,23 @@ class ACREDataModule(BaseDataModule):
             img_idx += offset
 
         if self.mode == "inference":
-            return BaseDataset(x, y, self._build_image_tensor_sequence)
+            if self.pre_transform:
+                x = [[io.read_image(img) for img in imgs] for imgs in x]
+                return BaseDataset(x, y, self._transform_sequence_only)
+            else:
+                return BaseDataset(x, y, self._build_image_tensor_sequence)
         else:
-            return BaseDataset(x, y, self.load_image_tensor)
+            if self.pre_transform:
+                x = [io.read_image(img) for img in x]
+                return BaseDataset(x, y, self.transform_only)
+            else:
+                return BaseDataset(x, y, self.load_image_tensor)
 
     def setup(self, stage=None):
         if stage == "fit":
             self.train_data = self._setup_split("train")
             self.val_data = self._setup_split("val")
+            self._subset_data(train=True, val=True)
         elif stage == "test":
             self.test_data = self._setup_split("test")
         
@@ -285,26 +343,31 @@ class RAVENDataModule(BaseDataModule):
             "val" : ["center_single"],
             "test" : ["center_single"]
         },
+        "IID_TRANSFER" : {
+            "train" : ["center_single", "distribute_four", "in_center_single_out_center_single"],
+            "val" : ["center_single", "distribute_four", "in_center_single_out_center_single"],
+            "test" : ["center_single", "distribute_four", "in_center_single_out_center_single"]
+        },
         "OOD" : {
-            "train" : ["center_single", "distribute_four", "distribute_nine"],
-            "val" : ["center_single", "distribute_four", "distribute_nine"],
+            "train" : ["in_center_single_out_center_single", "in_distribute_four_out_center_single", "left_center_single_right_center_single", "up_center_single_down_center_single"],
+            "val" : ["in_center_single_out_center_single", "in_distribute_four_out_center_single", "left_center_single_right_center_single", "up_center_single_down_center_single"],
             "test" : ["in_center_single_out_center_single", "in_distribute_four_out_center_single", "left_center_single_right_center_single", "up_center_single_down_center_single"]
         },
         "OOD_SMALL" : {
-            "train" : ["center_single"],
-            "val" : ["center_single"],
+            "train" : ["distribute_four", "distribute_nine"],
+            "val" : ["distribute_four", "distribute_nine"],
             "test" : ["distribute_four", "distribute_nine"]
         },
         "OOD_TRANSFER" : {
-            "train" : ["center_single", "distribute_four", "in_center_single_out_center_single"],
-            "val" : ["center_single", "distribute_four", "in_center_single_out_center_single"],
-            "test" : ["in_distribute_four_out_center_single"]
+            "train" : ["distribute_nine", "in_distribute_four_out_center_single"],
+            "val" : ["distribute_nine", "in_distribute_four_out_center_single"],
+            "test" : ["distribute_nine", "in_distribute_four_out_center_single"]
         } 
     }
 
 
-    def __init__(self, data_dir: str = DEFAULT_SAVE_DIR, split: Optional[str] = None, mode: str = "inference", batch_size: int = 32, num_workers: int = 4, train_val_split: int = DEFAULT_VALIDATION_SPLIT, **kwargs):
-        super(RAVENDataModule, self).__init__(data_dir, split, mode, batch_size, num_workers, train_val_split, **kwargs)
+    def __init__(self, **kwargs):
+        super(RAVENDataModule, self).__init__(**kwargs)
         self.image_transform_fn = transforms_v2.Compose([
             transforms.ToTensor(), # [0, 255] -> [0, 1]
             transforms_v2.ToDtype(torch.float32),
@@ -312,7 +375,7 @@ class RAVENDataModule(BaseDataModule):
             transforms_v2.Resize((128, 128)) # [160x160] --> [128x128]
         ])
 
-        if mode == "inference":
+        if self.mode == "inference":
             self.transform = self._load_image_tensor_sequence
             self.target_transform = self._load_target
         else:
@@ -354,12 +417,13 @@ class RAVENDataModule(BaseDataModule):
                 x.append(distrib_file_path)
                 y.append(distrib_file_path)
                 
-        return BaseDataset(x, y, self.transform, self.target_transform)
+        return BaseDataset(x, y, self.transform, self.target_transform, pre_transform=self.pre_transform)
 
     def setup(self, stage=None):
         if stage == "fit":
             self.train_data = self._setup_split("train")
             self.val_data = self._setup_split("val")
+            self._subset_data(train=True, val=True)
         elif stage == "test":
             self.test_data = self._setup_split("test")
 
@@ -390,8 +454,8 @@ class ConceptARCDataModule(BaseDataModule):
         "test": [9, 10]
     }
 
-    def __init__(self, data_dir: str = DEFAULT_SAVE_DIR, split: Optional[str] = None, mode: str = "inference", batch_size: int = 32, num_workers: int = 4, train_val_split: int = DEFAULT_VALIDATION_SPLIT, **kwargs):
-        super(ConceptARCDataModule, self).__init__(data_dir, split, mode, batch_size, num_workers, train_val_split, **kwargs)
+    def __init__(self, **kwargs):
+        super(ConceptARCDataModule, self).__init__(**kwargs)
 
         self.img_transform = transforms_v2.Compose([
             transforms_v2.ToDtype(torch.float32),
@@ -407,7 +471,7 @@ class ConceptARCDataModule(BaseDataModule):
             transforms_v2.RandomRotation(30),
             transforms_v2.RandomAffine(0, translate=(0.1, 0.1))
         ])
-        if mode == "inference":
+        if self.mode == "inference":
             self.transform = self.img_transform
         else:
             self.transform = self.random_img_transform
@@ -487,14 +551,15 @@ class ConceptARCDataModule(BaseDataModule):
                 y += concept_y
 
         if self.mode == "inference":
-            return BaseDataset(x, y, self._multiple_context_transform, self._single_transform)
+            return BaseDataset(x, y, self._multiple_context_transform, self._single_transform, pre_transform=self.pre_transform)
         else:
-            return BaseDataset(x, y, self._single_transform) # No target transform during generation mode as y is not used
+            return BaseDataset(x, y, self._single_transform, pre_transform=self.pre_transform) # No target transform during generation mode as y is not used
 
     def setup(self, stage=None):
         if stage == "fit":
             self.train_data = self._setup_split("train")
             self.val_data = self._setup_split("val")
+            self._subset_data(train=True, val=True)
         elif stage == "test":
             self.test_data = self._setup_split("test")
 
