@@ -343,33 +343,53 @@ class CBNN(pl.LightningModule):
                 }
     
 
-    def _sample_context_from_distribution(self, split = "train"):
+    def _sample_context_from_distribution(self, split : str = "train", label : Optional[torch.Tensor] = None):
         dataloader = self.context_distrib_loader_funcs[split]()
-        
         context_list = []
-        for _ in range(self.z_samples):
-            x_context, _ = next(iter(dataloader))
-            context_list.append(x_context)
+
+        if label is None:
+            for _ in range(self.z_samples):
+                x_context, _ = next(iter(dataloader))
+                context_list.append(x_context.to(self.device))
+        
+        else: # match context to label
+            candidates = {i:[] for i in label.unique().tolist()}
+            for _ in range(self.z_samples):
+                while not all([len(candidates[i]) >= (label==i).sum().item() for i in candidates]):
+                    x_context, y_context = next(iter(dataloader))
+                    for i in range(len(y_context)):
+                        if y_context[i].item() in candidates:
+                            candidates[y_context[i].item()].append(x_context[i])
+                selected_context = []
+                for i in label.tolist():
+                    selected_context.append(candidates[i].pop(0))
+                context_list.append(torch.stack(selected_context).to(self.device))
+        
         self.pre_load_context(context_list)
 
-    def on_fit_start(self):
+    def _fill_context_dataloader(self):
         self.context_distrib_loader_funcs["train"] = self.trainer.datamodule.train_dataloader
         self.context_distrib_loader_funcs["val"] = self.trainer.datamodule.val_dataloader
         self.context_distrib_loader_funcs["test"] = self.trainer.datamodule.test_dataloader
+
+    def on_fit_start(self):
+        self._fill_context_dataloader()
+
+    def on_test_start(self):
+        self._fill_context_dataloader()
     
     def on_predict_start(self):
-        self.context_distrib_loader_funcs["train"] = self.trainer.datamodule.train_dataloader
-        self.context_distrib_loader_funcs["val"] = self.trainer.datamodule.val_dataloader
-        self.context_distrib_loader_funcs["test"] = self.trainer.datamodule.test_dataloader
+        self._fill_context_dataloader()
 
 
     def training_step(self, batch, batch_idx):
+        x, y = batch
+
         if self.sample_context_from_distribution:
-            self._sample_context_from_distribution(split="train")
+            self._sample_context_from_distribution(split="train", label=y)
 
         x_context = self.x_context
 
-        x, y = batch
         x_recons, y_recon, *outputs = self(x, x_context)
 
         losses = self.loss_function(x, x_recons, y, y_recon, *outputs)
