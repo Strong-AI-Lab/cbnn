@@ -32,6 +32,8 @@ class CBNN(pl.LightningModule):
             inverse_context : bool = False,
             inference_without_encoder : bool = False,
             sample_context_from_distribution : bool = False,
+            freeze_parameters : Optional[List[str]] = None,
+            reverse_freeze : bool = False,
             **kwargs
             ):
         super(CBNN, self).__init__()
@@ -41,6 +43,7 @@ class CBNN(pl.LightningModule):
         self.context_decoder = None
         self.inference_encoder = None
         self.inference_classifier = None
+        self.x_context = None
 
         # Sampling parameters
         self.z_samples = z_samples
@@ -68,6 +71,11 @@ class CBNN(pl.LightningModule):
         }
 
         self._init_modules(**kwargs)
+
+        # Freeze parameters
+        if freeze_parameters is not None:
+            self.partial_freeze(freeze_parameters, reverse=reverse_freeze)
+
         self.save_hyperparameters()
 
 
@@ -92,6 +100,8 @@ class CBNN(pl.LightningModule):
         parser.add_argument('--inverse_context', action='store_true', help='Switch context and inference encoders to be reflect the theoretical groundings.')
         parser.add_argument('--inference_without_encoder', action='store_true', help='Use when the inference network is a single decoder module and does not require an encoder.')
         parser.add_argument('--sample_context_from_distribution', action='store_true', help='Sample context from the distribution. If false, use the input as context')
+        parser.add_argument('--freeze_parameters', type=str, nargs='+', default=None, help='List of parameters to freeze during training.')
+        parser.add_argument('--reverse_freeze', action='store_true', help='Reverse the freeze list to freeze all parameters except those in the list.')
 
         return parent_parser
 
@@ -118,9 +128,15 @@ class CBNN(pl.LightningModule):
 
         if x_context is None:
             x_context = [x]
+        else: # adjust batch size mismatch
+            c_batch_size = x_context[0].size(0)
+            if c_batch_size > batch_size:
+                x_context = [x_c[:batch_size] for x_c in x_context]
+            elif c_batch_size < batch_size:
+                x_context = [torch.cat([x_c, x_c[:batch_size-c_batch_size]]) for x_c in x_context]
 
         if self.inference_without_encoder:
-            inference_encoding_func = lambda x: (torch.zeros(batch_size * self.nb_input_images, 1), torch.ones(batch_size * self.nb_input_images, 1))
+            inference_encoding_func = lambda x: (torch.zeros(x.size(0), 1), torch.ones(x.size(0), 1))
         else:
             inference_encoding_func = self.inference_encoder
 
@@ -141,8 +157,8 @@ class CBNN(pl.LightningModule):
         
         x_c = torch.cat(x_context) # concat context inputs at batch size for the encoding step
         mu_c, log_var_c = context_encoder(x_c)
-        context_mus = [mu_c[i:i+batch_size] for i in range(self.z_samples)]
-        context_log_vars = [log_var_c[i:i+batch_size] for i in range(self.z_samples)]
+        context_mus = [mu_c[i*(batch_size*self.nb_input_images):(i+1)*(batch_size*self.nb_input_images)] for i in range(self.z_samples)]
+        context_log_vars = [log_var_c[i*(batch_size*self.nb_input_images):(i+1)*(batch_size*self.nb_input_images)] for i in range(self.z_samples)]
 
         inference_mu, inference_log_var = inference_encoder(x)
 
@@ -173,7 +189,10 @@ class CBNN(pl.LightningModule):
 
 
             if self.inference_without_encoder: # mu, log_var do not exist (values are not filled)
-                z = x.view(x_shape)
+                if self.inverse_context:
+                    z = x_context[c_idx].view(x_shape)
+                else:
+                    z = x.view(x_shape)
                 context_z = self.sample(context_mu, context_log_var)
             else:
                 context_z = self.sample(context_mu, context_log_var)
@@ -345,7 +364,6 @@ class CBNN(pl.LightningModule):
 
         losses = self.loss_function(x, x_recons, y, y_recon, *outputs)
         losses = {"train_" + k: v for k, v in losses.items()}
-        print(losses)
         self.log_dict(losses, sync_dist=True)
         return losses['train_loss']
     
@@ -360,7 +378,6 @@ class CBNN(pl.LightningModule):
         
         losses = self.loss_function(x, x_recons, y, y_recon, *outputs)
         losses = {"val_" + k: v for k, v in losses.items()}
-        print(losses)
         self.log_dict(losses, sync_dist=True)
         return losses['val_loss']
     
@@ -378,13 +395,18 @@ class CBNN(pl.LightningModule):
         
         losses = self.loss_function(x, x_recons, y, y_recon, *outputs)
         losses = {"test_" + k: v for k, v in losses.items()}
-        print(losses)
         self.log_dict(losses, sync_dist=True)
         return losses['test_loss']
     
     
     def configure_optimizers(self):
         return torch.optim.AdamW(self.parameters(), lr=self.learning_rate, weight_decay=self.weight_decay)
+
+    def partial_freeze(self, frozen_layers : List[str], reverse : bool = False):
+        for name, param in self.named_parameters():
+            if (name in frozen_layers and not reverse) or (name not in frozen_layers and reverse):
+                param.requires_grad_(False)
+        
     
 
 
