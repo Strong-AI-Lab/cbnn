@@ -282,25 +282,32 @@ class CBNN(pl.LightningModule):
             recons_loss /= len(x_recons)
 
 
-        # Context Encoder Kullback-Leibler divergence loss
+        # Context Encoder Kullback-Leibler divergence loss and variance
         context_kld_loss = torch.tensor(0.0).to(x.device)
+        context_kld_var = torch.tensor(0.0).to(x.device)
         if self.context_kld_weight > 0.0:
             for context_mu, context_log_var in zip(context_mus, context_log_vars):
                 context_kld_loss += normal_kullback_leibler_divergence(context_mu, context_log_var)
+                context_kld_var += torch.exp(context_log_var).mean()
             context_kld_loss /= len(context_mus)
+            context_kld_var /= len(context_log_vars)
 
-        # Inference Encoder Kullback-Leibler divergence loss
+        # Inference Encoder Kullback-Leibler divergence loss and variance
         if self.kld_weight > 0.0:
             kld_loss = normal_kullback_leibler_divergence(mu, log_var)
+            kld_var = torch.exp(log_var).mean()
         else:
             kld_loss = torch.tensor(0.0).to(x.device)
+            kld_var = torch.tensor(0.0).to(x.device)
 
-        # Weights Kullback-Leibler divergence loss
+        # Weights Kullback-Leibler divergence loss and variance
         if self.w_kld_weight > 0.0:
             weights_mean, weights_log_var = self.inference_classifier.get_weight_distributions()
             w_kld_loss = normal_kullback_leibler_divergence(weights_mean, weights_log_var)
+            w_kld_var = torch.exp(weights_log_var).mean()
         else:
             w_kld_loss = torch.tensor(0.0).to(x.device)
+            w_kld_var = torch.tensor(0.0).to(x.device)
 
 
         # Inference-Context Mutual Information loss
@@ -329,7 +336,10 @@ class CBNN(pl.LightningModule):
                 'KLD':-kld_loss.detach(), 
                 'IC_MI':ic_mi_loss.detach(), 
                 'WC_MI':wc_mi_loss.detach(),
-                'Accuracy':self.accuracy(y_recon, y_target).detach()
+                'Accuracy':self.accuracy(y_recon, y_target).detach(),
+                'Context_KLD_Var':context_kld_var.detach(),
+                'Weights_KLD_Var':w_kld_var.detach(),
+                'KLD_Var':kld_var.detach()
                 }
     
 
