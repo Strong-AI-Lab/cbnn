@@ -32,7 +32,7 @@ inference_mode: true
 ipus: null
 kld_weight: 2.5e-05
 latent_dim: 256
-learning_rate: 0.001
+learning_rate: 0.005
 limit_predict_batches: null
 limit_test_batches: null
 limit_train_batches: null
@@ -71,5 +71,5 @@ train: false
 train_and_test: false
 train_val_split: 0.2
 val_check_interval: null
-wandb_project: null
+wandb_project: cbnn
 weight_decay: 1.0e-05

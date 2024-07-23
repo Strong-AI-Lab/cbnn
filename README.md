@@ -61,9 +61,9 @@ To run the experiments from a config file, use the following command:
 python run.py --load_config 'config/<config_file>.yaml' '<model_name>'
 ```
 
-You can also override any parameter from the config file by passing it as an argument:
+You can also pass arguments directly to the script:
 ```bash
-python run.py --load_config 'config/<config_file>.yaml' --<parameter> '<value>' '<model_name>' --<model_parameter> '<value>'
+python run.py --<parameter> '<value>' '<model_name>' --<model_parameter> '<value>'
 ```
 
 Use the `-h` flag to see the available options:

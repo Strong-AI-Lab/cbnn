@@ -36,7 +36,7 @@ inference_mode: true
 ipus: null
 kld_weight: 1.0e-05
 latent_dim: 128
-learning_rate: 0.001
+learning_rate: 0.005
 limit_predict_batches: null
 limit_test_batches: null
 limit_train_batches: null
@@ -57,7 +57,7 @@ nb_input_images: 1
 num_nodes: 1
 num_processes: null
 num_sanity_val_steps: 2
-num_workers: 4
+num_workers: 0
 out_channels: 10
 overfit_batches: 0.0
 plugins: null
@@ -79,8 +79,8 @@ train_and_test: false
 train_val_split: 0.2
 val_check_interval: null
 w_kld_weight: 1.0e-05
-w_samples: 2
-wandb_project: null
+w_samples: 1
+wandb_project: cbnn
 wc_mi_weight: 0.0
 weight_decay: 1.0e-05
-z_samples: 32
+z_samples: 1

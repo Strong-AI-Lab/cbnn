@@ -5,7 +5,7 @@ amp_level: null
 auto_lr_find: false
 auto_scale_batch_size: false
 auto_select_gpus: null
-batch_size: 128
+batch_size: 64
 benchmark: null
 check_val_every_n_epoch: 1
 data: RAVEN
@@ -49,8 +49,9 @@ num_sanity_val_steps: 2
 num_workers: 4
 overfit_batches: 0.0
 plugins: null
+pre_transform: false
 precision: 32
-pretrained: true
+pretrained: False
 profiler: null
 reload_dataloaders_every_n_epochs: 0
 replace_sampler_ddp: true
@@ -66,5 +67,5 @@ train: false
 train_and_test: false
 train_val_split: 0.2
 val_check_interval: null
-wandb_project: null
+wandb_project: cbnn
 weight_decay: 0.0

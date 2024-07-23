@@ -69,5 +69,5 @@ train: false
 train_and_test: false
 train_val_split: 0.2
 val_check_interval: null
-wandb_project: null
+wandb_project: cbnn
 weight_decay: 0.0
