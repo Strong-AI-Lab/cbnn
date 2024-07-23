@@ -4,7 +4,7 @@ from typing import Optional, List
 from .modules.encoders import CNNVariationalEncoder
 from .modules.decoders import CNNVariationalDecoder
 from .modules.classifiers import BayesianClassifier, MCQABayesClassifier
-from .modules.bayes_resnet_utils import bayes_resnet18_invariant, mcqa_bayes_resnet18_invariant
+from .modules.bayes_resnet_utils import bayes_resnet18_invariant, mcqa_bayes_resnet18_invariant, mipred_bayes_resnet18_invariant
 from ..trainer.losses import normal_kullback_leibler_divergence, gaussian_mutual_information
 from .utils import sample_images
 
@@ -586,6 +586,45 @@ class MCQA_ResNet_CBNN(CBNN):
         parent_parser = super(MCQA_ResNet_CBNN, cls).add_model_specific_args(parent_parser)
 
         parser = parent_parser.add_argument_group("MCQA_ResNet_CBNN")
+        parser.add_argument('--in_channels', type=int, default=3, help='Number of input channels.')
+        parser.add_argument('--image_dim', type=int, default=64, help='Dimension of the input image. Image is assumed to be square.')
+        parser.add_argument('--num_classes', type=int, default=10, help='Number of classes in the dataset.')
+        parser.add_argument('--latent_dim', type=int, default=256, help='Dimension of the latent space.')
+        parser.add_argument('--encoder_hidden_dims', type=int, nargs='+', default=[32, 64, 128, 256, 512], help='Hidden dimensions for the encoder.')
+        
+        return parent_parser
+
+
+
+
+class MIPred_ResNet_CBNN(CBNN):
+    def __init__(self, **kwargs):
+        if 'inference_without_encoder' in kwargs:
+            kwargs.pop('inference_without_encoder')
+        super(MIPred_ResNet_CBNN, self).__init__(inference_without_encoder=True, **kwargs)
+
+
+    def _init_modules(self,
+            in_channels: int = 3,
+            image_dim: int = 64,
+            num_classes: int = 10,
+            latent_dim: int = 256,
+            encoder_hidden_dims: List = None,
+            **kwargs):
+        
+        self.latent_dim = latent_dim
+        
+        # Build modules
+        self.context_encoder = CNNVariationalEncoder(in_channels, image_dim, latent_dim, encoder_hidden_dims)
+        self.context_decoder = CNNVariationalDecoder(latent_dim, in_channels, image_dim, encoder_hidden_dims[::-1] if encoder_hidden_dims is not None else None)
+        self.inference_encoder = None
+        self.inference_classifier = mipred_bayes_resnet18_invariant(in_channels, self.nb_input_images, latent_dim, num_classes, latent_dim, image_size=image_dim)
+    
+    @classmethod
+    def add_model_specific_args(cls, parent_parser):
+        parent_parser = super(MIPred_ResNet_CBNN, cls).add_model_specific_args(parent_parser)
+
+        parser = parent_parser.add_argument_group("MIPred_ResNet_CBNN")
         parser.add_argument('--in_channels', type=int, default=3, help='Number of input channels.')
         parser.add_argument('--image_dim', type=int, default=64, help='Dimension of the input image. Image is assumed to be square.')
         parser.add_argument('--num_classes', type=int, default=10, help='Number of classes in the dataset.')

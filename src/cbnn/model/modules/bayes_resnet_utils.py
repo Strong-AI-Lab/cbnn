@@ -310,6 +310,34 @@ class MCQABayesResNetInvariant(BayesResNetInvariant):
         # Compute scores
         scores = (context.unsqueeze(1) @ choices.permute(0,2,1)).view(batch_size, self.nb_choices) # [batch_size, 1, embedding_dim] x [batch_size, embedding_dim, nb_choices] -> [batch_size, nb_choices]
         return scores, *w
+    
+
+
+
+
+class MIPredBayesResNetInvariant(BayesResNetInvariant):
+    def __init__(self, block: Type[Union[BasicBlock, Bottleneck]], layers: List[int], nb_input_images : int = 5, embedding_dim : int = 512, num_classes : int = 1000, **kwargs):
+        super(MIPredBayesResNetInvariant, self).__init__(block, layers, num_classes=embedding_dim, **kwargs)
+        self.nb_input_images = nb_input_images
+        self.embedding_dim = embedding_dim
+
+        if self.nb_input_images < 2:
+            raise ValueError("The number of input images must be at least 2.")
+
+        self.fc_2 = torch.nn.Linear(nb_input_images * embedding_dim, num_classes)
+    
+    def forward(self, x : torch.Tensor, r: torch.Tensor, eps: Optional[torch.Tensor] = None): # [batch_size, nb_images, channels, height, width]
+        batch_size = x.size(0)
+
+        # Compute embeddings of context and choices
+        x = x.view(batch_size * self.nb_input_images, *x.size()[2:]) # [batch_size, nb_input_images, channels, height, width] -> [batch_size * nb_input_images, channels, height, width]
+        r = r.view(batch_size * self.nb_input_images, self.embedding_dim) # [batch_size, nb_input_images, * invariant_dim] -> [batch_size * nb_input_images, invariant_dim]
+        x, *w = super().forward(x, r, eps) # [batch_size * nb_input_images, channels, height, width] -> [batch_size * nb_input_images, embedding_dim]
+        x = x.view(batch_size, self.nb_input_images * self.embedding_dim) # [batch_size * nb_input_images, embedding_dim] -> [batch_size, nb_input_images * embedding_dim]
+        
+        # Compute classes
+        classes = self.fc_2(x) # [batch_size, nb_input_images * embedding_dim] -> [batch_size, num_classes]
+        return classes, *w
 
 
     
@@ -322,3 +350,6 @@ def bayes_resnet18_invariant(in_channels : int = 3, num_classes: int = 1000, inv
 
 def mcqa_bayes_resnet18_invariant(in_channels : int = 3, nb_input_images: int = 5, embedding_dim: int = 512, num_classes: int = 1000, invariant_dim: int = 64, image_size: int = 64, **kwargs):
     return MCQABayesResNetInvariant(BasicBlock, [2, 2, 2, 2], in_channels=in_channels, nb_input_images=nb_input_images, embedding_dim=embedding_dim, num_classes=num_classes, invariant_dim=invariant_dim, image_size=image_size, **kwargs)
+
+def mipred_bayes_resnet18_invariant(in_channels : int = 3, nb_input_images: int = 5, embedding_dim: int = 512, num_classes: int = 1000, invariant_dim: int = 64, image_size: int = 64, **kwargs):
+    return MIPredBayesResNetInvariant(BasicBlock, [2, 2, 2, 2], in_channels=in_channels, nb_input_images=nb_input_images, embedding_dim=embedding_dim, num_classes=num_classes, invariant_dim=invariant_dim, image_size=image_size, **kwargs)

@@ -1,3 +1,4 @@
+
 from typing import List, Optional
 
 import pytorch_lightning as pl
@@ -136,6 +137,40 @@ class MCQAResNet18(ResNet18):
     def add_model_specific_args(cls, parent_parser):
         parent_parser = super(MCQAResNet18, cls).add_model_specific_args(parent_parser)
         parser = parent_parser.add_argument_group("MCQAResNet18")
+        parser.add_argument('--nb_input_images', type=int, default=5, help='Number of input images (context + choices).')
+        parser.add_argument('--embedding_dim', type=int, default=512, help='Dimension of the embeddings before weighting of the choices.')
+        return parent_parser
+
+
+
+class MIPredResNet18(ResNet18):
+    def __init__(self, in_channels: int = 3, num_classes: int = 10, pretrained: bool = True, learning_rate : float = 0.005, weight_decay : float = 0.0, nb_input_images : int = 5, embedding_dim : int = 512, **kwargs):
+        super(MIPredResNet18, self).__init__(in_channels, embedding_dim, pretrained, learning_rate, weight_decay, **kwargs)
+        self.nb_input_images = nb_input_images
+        self.embedding_dim = embedding_dim
+
+        if self.nb_input_images < 2:
+            raise ValueError("The number of input images must be at least 2.")
+        
+        self.fc_2 = torch.nn.Linear(embedding_dim * self.nb_input_images, num_classes)
+    
+    def forward(self, x): # [batch_size, nb_images, channels, height, width]
+        batch_size = x.size(0)
+
+        # Compute embeddings of input images
+        x = x.view(batch_size * self.nb_input_images, *x.size()[2:]) # [batch_size, nb_images, channels, height, width] -> [batch_size * nb_images, channels, height, width]
+        x = super().forward(x) # [batch_size * nb_images, channels, height, width] -> [batch_size * nb_images, embedding_dim]
+        x = x.view(batch_size, self.nb_input_images * self.embedding_dim) # [batch_size * nb_images, embedding_dim] -> [batch_size, nb_images * embedding_dim]
+
+        # Compute classes
+        classes = self.fc_2(x) # [batch_size, nb_images * embedding_dim] -> [batch_size, num_classes]
+        return classes
+
+    
+    @classmethod
+    def add_model_specific_args(cls, parent_parser):
+        parent_parser = super(MIPredResNet18, cls).add_model_specific_args(parent_parser)
+        parser = parent_parser.add_argument_group("MIPredResNet18")
         parser.add_argument('--nb_input_images', type=int, default=5, help='Number of input images (context + choices).')
         parser.add_argument('--embedding_dim', type=int, default=512, help='Dimension of the embeddings before weighting of the choices.')
         return parent_parser
