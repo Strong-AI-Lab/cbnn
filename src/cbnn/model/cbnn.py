@@ -29,6 +29,8 @@ class CBNN(pl.LightningModule):
             wc_mi_weight : float = 1.0,
             learning_rate : float = 0.005, 
             weight_decay : float = 0.0,
+            l2_regularisation : float = 0.0,
+            context_inference_weight : float = 0.0,
             inverse_context : bool = False,
             inference_without_encoder : bool = False,
             sample_context_from_distribution : bool = False,
@@ -44,6 +46,7 @@ class CBNN(pl.LightningModule):
         self.inference_encoder = None
         self.inference_classifier = None
         self.x_context = None
+        self.y_context = None
 
         # Sampling parameters
         self.z_samples = z_samples
@@ -62,6 +65,8 @@ class CBNN(pl.LightningModule):
         self.wc_mi_weight = wc_mi_weight
         self.learning_rate = learning_rate
         self.weight_decay = weight_decay
+        self.l2_regularisation = l2_regularisation
+        self.context_inference_weight = context_inference_weight
 
         # Context loader
         self.context_distrib_loader_funcs = {
@@ -97,6 +102,8 @@ class CBNN(pl.LightningModule):
         parser.add_argument('--wc_mi_weight', type=float, default=1.0, help='Weight of the Weights-Context Mutual Information loss.')
         parser.add_argument('--learning_rate', type=float, default=0.005, help='Learning rate for the optimizer.')
         parser.add_argument('--weight_decay', type=float, default=0.0, help='Weight decay for the optimizer.')
+        parser.add_argument('--l2_regularisation', type=float, default=0.0, help='Additional L2 regularisation for the sampled weights.')
+        parser.add_argument('--context_inference_weight', type=float, default=0.4, help='Weight of the context inference labels in the mixed labels.')
         parser.add_argument('--inverse_context', action='store_true', help='Switch context and inference encoders to be reflect the theoretical groundings.')
         parser.add_argument('--inference_without_encoder', action='store_true', help='Use when the inference network is a single decoder module and does not require an encoder.')
         parser.add_argument('--sample_context_from_distribution', action='store_true', help='Sample context from the distribution. If false, use the input as context')
@@ -109,11 +116,13 @@ class CBNN(pl.LightningModule):
     def loaded_context(self):
         return self.x_context is not None
 
-    def pre_load_context(self, x_context: List[torch.Tensor]):
+    def pre_load_context(self, x_context: List[torch.Tensor], y_context: Optional[List[torch.Tensor]] = None):
         self.x_context = x_context
+        self.y_context = y_context
 
     def clear_context(self):
         self.x_context = None
+        self.y_context = None
 
 
     def sample(self, mu: torch.Tensor, log_var: torch.Tensor):
@@ -248,6 +257,8 @@ class CBNN(pl.LightningModule):
     
     
     def accuracy(self, y_recon : torch.Tensor, y : torch.Tensor):
+        if len(y.size()) > 1: # y is a one-hot encoded tensor or a probability distribution, convert to maximum likelihood class labels
+            y = torch.argmax(y, dim=1)
         return torch.sum(y == torch.argmax(y_recon, dim=1)).float() / y.size(0)
     
     def loss_function(self, 
@@ -326,8 +337,13 @@ class CBNN(pl.LightningModule):
         else:
             wc_mi_loss = torch.tensor(0.0).to(x.device)
 
+        if self.l2_regularisation > 0.0:
+            l2_loss = torch.cat([w.view(-1) for w in weight_samples]).pow(2).sum() / (2 * len(weight_samples))
+        else:
+            l2_loss = torch.tensor(0.0).to(x.device)
 
-        loss = infer_loss + recons_weight * recons_loss + context_kld_weight * context_kld_loss + kld_weight * kld_loss + w_kld_weight * w_kld_loss + ic_mi_weight * ic_mi_loss + wc_mi_weight * wc_mi_loss
+
+        loss = infer_loss + recons_weight * recons_loss + context_kld_weight * context_kld_loss + kld_weight * kld_loss + w_kld_weight * w_kld_loss + ic_mi_weight * ic_mi_loss + wc_mi_weight * wc_mi_loss + self.l2_regularisation * l2_loss
         return {'loss': loss, 
                 'Inference_Loss':infer_loss.detach(), 
                 'Reconstruction_Loss':recons_loss.detach(), 
@@ -336,21 +352,29 @@ class CBNN(pl.LightningModule):
                 'KLD':-kld_loss.detach(), 
                 'IC_MI':ic_mi_loss.detach(), 
                 'WC_MI':wc_mi_loss.detach(),
+                'L2': l2_loss.detach(),
                 'Accuracy':self.accuracy(y_recon, y_target).detach(),
                 'Context_KLD_Var':context_kld_var.detach(),
                 'Weights_KLD_Var':w_kld_var.detach(),
                 'KLD_Var':kld_var.detach()
                 }
     
+    def _mix_labels(self, y_target : torch.Tensor, labels_to_mix : List[torch.Tensor], num_classes : int):
+        y_mix = torch.nn.functional.one_hot(y_target, num_classes=num_classes) * (1 - self.context_inference_weight)
+        for l_i in labels_to_mix:
+            y_mix += torch.nn.functional.one_hot(l_i, num_classes=num_classes) * self.context_inference_weight / len(labels_to_mix)
+        return y_mix
 
     def _sample_context_from_distribution(self, split : str = "train", label : Optional[torch.Tensor] = None):
         dataloader = self.context_distrib_loader_funcs[split]()
         context_list = []
+        context_label_list = []
 
         if label is None:
             for _ in range(self.z_samples):
-                x_context, _ = next(iter(dataloader))
+                x_context, y_context = next(iter(dataloader))
                 context_list.append(x_context.to(self.device))
+                context_label_list.append(y_context.to(self.device))
         
         else: # match context to label
             candidates = {i:[] for i in label.unique().tolist()}
@@ -364,8 +388,9 @@ class CBNN(pl.LightningModule):
                 for i in label.tolist():
                     selected_context.append(candidates[i].pop(0))
                 context_list.append(torch.stack(selected_context).to(self.device))
+                context_label_list.append(label.to(self.device))
         
-        self.pre_load_context(context_list)
+        self.pre_load_context(context_list, context_label_list)
 
     def _fill_context_dataloader(self):
         self.context_distrib_loader_funcs["train"] = self.trainer.datamodule.train_dataloader
@@ -383,14 +408,16 @@ class CBNN(pl.LightningModule):
 
 
     def training_step(self, batch, batch_idx):
-        x, y = batch
-
         if self.sample_context_from_distribution:
-            self._sample_context_from_distribution(split="train", label=y)
+            self._sample_context_from_distribution(split="train")
 
         x_context = self.x_context
+        y_context = self.y_context
 
+        x, y = batch
         x_recons, y_recon, *outputs = self(x, x_context)
+        if self.context_inference_weight > 0.0:
+            y = self._mix_labels(y, y_context, y_recon.size(-1))
 
         losses = self.loss_function(x, x_recons, y, y_recon, *outputs)
         losses = {"train_" + k: v for k, v in losses.items()}
