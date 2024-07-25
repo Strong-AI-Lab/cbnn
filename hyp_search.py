@@ -20,23 +20,19 @@ def hyp_search(config, **args):
     main(args, callbacks=[RayTrainReportCallback()])
 
 def build_config(args):
-    config = {  
-        # 'accelerator': 'gpu', 
-        # 'devices': '1',
-        # 'z_samples': tune.choice([4, 8, 16]),
-        # 'w_samples': tune.choice([4, 8, 16]),
-        'recon_weight': tune.uniform(0.1, 4),
-        'kld_weight': tune.loguniform(1e-6, 1e-2),
-        'context_kld_weight': tune.loguniform(1e-6, 1e-2),
-        'w_kld_weight': tune.loguniform(1e-6, 1e-2),
-        # 'ic_mi_weight': tune.loguniform(1e-6, 1e-2),
-        # 'wc_mi_weight': tune.loguniform(1e-6, 1e-2),
-        # 'learning_rate': tune.loguniform(1e-5, 1e-3),
-        # 'weight_decay': tune.loguniform(1e-5, 1e-3),
-        # 'latent_dim': tune.choice([32, 64, 128, 256, 512]),
-        # 'encoder_hidden_dims': tune.choice([[32, 64, 128, 256, 512], [64, 128, 256, 512, 1024]]),
-        # 'classifier_hidden_dim': tune.choice([32, 64, 128, 256, 512]),
-        # 'classifier_nb_layers': tune.choice([1, 3, 6]),
+    config = {
+        'z_samples': tune.choice([1, 4]),
+        'w_samples': tune.choice([1, 4]),
+        'recon_weight': tune.loguniform(1e-2, 10),
+        'kld_weight': tune.loguniform(1e-7, 1e-3),
+        'context_kld_weight': tune.loguniform(1e-7, 1e-3),
+        'w_kld_weight': tune.loguniform(1e-7, 1e-3),
+        'context_inference_weight': tune.choice([0.0, 0.25, 0.4]),
+        'context_split_mi_weight': tune.choice([0.0, 0.5, 1.0]),
+        'split_recons_infer_latents': tune.choice([None, 0.5]),
+        'learning_rate': tune.loguniform(1e-5, 1e-3),
+        'weight_decay': tune.loguniform(1e-5, 1e-3),
+        'recon_weight': tune.loguniform(1e-2, 10),
     }
     for key in config:
         if key in args:

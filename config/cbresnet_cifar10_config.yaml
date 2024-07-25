@@ -9,6 +9,7 @@ batch_size: 64
 benchmark: null
 check_val_every_n_epoch: 1
 context_inference_weight: 0.0
+context_split_mi_weight: 0.0
 context_kld_weight: 1.0e-05
 data: CIFAR10
 data_dir: data/CIFAR10/
@@ -72,6 +73,7 @@ resume_from_checkpoint: null
 sample_context_from_distribution: true
 save: null
 split: null
+split_recons_infer_latents: null
 strategy: null
 sync_batchnorm: false
 test: false

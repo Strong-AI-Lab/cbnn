@@ -49,6 +49,8 @@ class ResNet18(pl.LightningModule):
         parser.add_argument('--pretrained', type=bool, default=True, help='Load pretrained weights.')
         parser.add_argument('--learning_rate', type=float, default=0.005, help='Learning rate for the optimizer.')
         parser.add_argument('--weight_decay', type=float, default=0.0, help='Weight decay for the optimizer.')
+        parser.add_argument('--freeze_parameters', type=str, nargs='+', default=None, help='List of layers to freeze.')
+        parser.add_argument('--reverse_freeze', type=bool, default=False, help='Reverse the freezing of the layers.')
         return parent_parser
     
     def training_step(self, batch, batch_idx):

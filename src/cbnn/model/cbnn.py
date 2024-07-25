@@ -36,6 +36,8 @@ class CBNN(pl.LightningModule):
             sample_context_from_distribution : bool = False,
             freeze_parameters : Optional[List[str]] = None,
             reverse_freeze : bool = False,
+            split_recons_infer_latents : Optional[float] = None,
+            context_split_mi_weight : float = 1.0,
             **kwargs
             ):
         super(CBNN, self).__init__()
@@ -55,6 +57,8 @@ class CBNN(pl.LightningModule):
         self.inverse_context = inverse_context
         self.inference_without_encoder = inference_without_encoder
         self.sample_context_from_distribution = sample_context_from_distribution
+        self.split_recons_infer_latents = split_recons_infer_latents
+        self.latent_dim = None
 
         # Loss weights
         self.recon_weight = recon_weight
@@ -67,6 +71,7 @@ class CBNN(pl.LightningModule):
         self.weight_decay = weight_decay
         self.l2_regularisation = l2_regularisation
         self.context_inference_weight = context_inference_weight
+        self.context_split_mi_weight = context_split_mi_weight
 
         # Context loader
         self.context_distrib_loader_funcs = {
@@ -84,8 +89,22 @@ class CBNN(pl.LightningModule):
         self.save_hyperparameters()
 
 
-    def _init_modules(self,**kwargs):
+    def _init_modules(self,**kwargs): # at least self.latent_dim, must be initialised in the child class
         raise NotImplementedError()
+    
+    @property
+    def recons_latent_dim(self):
+        if self.split_recons_infer_latents is not None:
+            return int(self.latent_dim * self.split_recons_infer_latents)
+        else:
+            return self.latent_dim
+        
+    @property
+    def infer_latent_dim(self):
+        if self.split_recons_infer_latents is not None:
+            return self.latent_dim - int(self.latent_dim * self.split_recons_infer_latents)
+        else:
+            return self.latent_dim
 
     @classmethod
     def add_model_specific_args(cls, parent_parser):
@@ -109,6 +128,8 @@ class CBNN(pl.LightningModule):
         parser.add_argument('--sample_context_from_distribution', action='store_true', help='Sample context from the distribution. If false, use the input as context')
         parser.add_argument('--freeze_parameters', type=str, nargs='+', default=None, help='List of parameters to freeze during training.')
         parser.add_argument('--reverse_freeze', action='store_true', help='Reverse the freeze list to freeze all parameters except those in the list.')
+        parser.add_argument('--split_recons_infer_latents', type=Optional[float], default=None, help='Split the latent space into two parts for reconstruction and inference.')
+        parser.add_argument('--context_split_mi_weight', type=float, default=1.0, help='Weight of the context split mutual information loss.')
 
         return parent_parser
 
@@ -135,7 +156,7 @@ class CBNN(pl.LightningModule):
         x_shape = x.size()
         batch_size = x_shape[0]
 
-        if x_context is None:
+        if x_context is None: # use input as context
             x_context = [x]
         else: # adjust batch size mismatch
             c_batch_size = x_context[0].size(0)
@@ -144,12 +165,12 @@ class CBNN(pl.LightningModule):
             elif c_batch_size < batch_size:
                 x_context = [torch.cat([x_c, x_c[:batch_size-c_batch_size]]) for x_c in x_context]
 
-        if self.inference_without_encoder:
+        if self.inference_without_encoder: # if inference network is a single decoder module, do not use encoder and create dummy encoder instead
             inference_encoding_func = lambda x: (torch.zeros(x.size(0), 1), torch.ones(x.size(0), 1))
         else:
             inference_encoding_func = self.inference_encoder
 
-        if self.inverse_context:
+        if self.inverse_context: # if inverse context, switch context and inference encoders to reconstruct inference input instead of context
             context_encoder = inference_encoding_func
             inference_encoder = self.context_encoder
         else:
@@ -157,7 +178,7 @@ class CBNN(pl.LightningModule):
             inference_encoder = inference_encoding_func
 
 
-        if self.nb_input_images > 1:
+        if self.nb_input_images > 1: # if multiple input images, reshape input tensor to (batch * nb_input_images, channels, height, width)
             assert len(x.size()) > 4, f"Input tensor must have at least 5 dimensions when nb_input_images is > 1: (batch, nb_input_images, channels, height, width). Got {len(x.size())} dimensions: {x.size()}"
             assert x.size(-4) == self.nb_input_images, f"Input tensor must have the same number of images as specified by nb_input_images. Got {x.size(-4)} images ({x.size()}), expected {self.nb_input_images}."
 
@@ -165,13 +186,16 @@ class CBNN(pl.LightningModule):
             x_context = [x_c.view(-1, *x_c.size()[-3:]) for x_c in x_context]
         
         x_c = torch.cat(x_context) # concat context inputs at batch size for the encoding step
+
+        # Encode context
         mu_c, log_var_c = context_encoder(x_c)
         context_mus = [mu_c[i*(batch_size*self.nb_input_images):(i+1)*(batch_size*self.nb_input_images)] for i in range(self.z_samples)]
         context_log_vars = [log_var_c[i*(batch_size*self.nb_input_images):(i+1)*(batch_size*self.nb_input_images)] for i in range(self.z_samples)]
 
+        # Encode inference input
         inference_mu, inference_log_var = inference_encoder(x)
 
-        if self.nb_input_images > 1:
+        if self.nb_input_images > 1: # if multiple input images, reshape inference latent variables to (batch, nb_input_images * latent_dim)
             inference_mu = inference_mu.view(batch_size, self.nb_input_images * inference_mu.size(-1))
             inference_log_var = inference_log_var.view(batch_size, self.nb_input_images * inference_log_var.size(-1))
 
@@ -183,7 +207,7 @@ class CBNN(pl.LightningModule):
         ws = []
         context_zs = []
         zs = []
-        for i in range(self.z_samples):
+        for i in range(self.z_samples): # sample z from context and inference latent variables
             c_idx = i if i < len(context_mus) else -1
             if self.inverse_context:
                 mu = context_mus[c_idx]
@@ -211,20 +235,34 @@ class CBNN(pl.LightningModule):
             context_zs.append(context_z)
             zs.append(z)
 
-            if self.nb_input_images > 1:
-                recon_context_z = context_z.view(batch_size * self.nb_input_images, -1)
+            
+            if self.split_recons_infer_latents is not None:
+                recon_context_z = context_z[..., :int(self.split_recons_infer_latents * context_z.size(-1))]
+            else:
+                recon_context_z = context_z
+
+            if self.nb_input_images > 1:                    
+                recon_context_z = recon_context_z.view(batch_size * self.nb_input_images, -1)
                 x_recon = self.context_decoder(recon_context_z)
                 x_recon = x_recon.view(batch_size, self.nb_input_images, *x_recon.size()[1:])
             else:
-                x_recon = self.context_decoder(context_z)
+                x_recon = self.context_decoder(recon_context_z)
 
             x_recons.append(x_recon)
 
-            for _ in range(self.w_samples):
-                try:
-                    infer_inputs = [torch.cat([z, context_z], dim=-1)]
-                except RuntimeError:
-                    infer_inputs = [z, context_z]
+            if self.split_recons_infer_latents is not None:
+                infer_context_z = context_z[..., int(self.split_recons_infer_latents * context_z.size(-1)):]
+            else:
+                infer_context_z = context_z
+
+            for _ in range(self.w_samples): # sample weights from the classifier
+                if not self.inference_without_encoder:
+                    try:
+                        infer_inputs = [torch.cat([z, infer_context_z], dim=-1)]
+                    except RuntimeError:
+                        infer_inputs = [z, infer_context_z]
+                else:
+                    infer_inputs = [z, infer_context_z]
 
                 y_j, *w_j = self.inference_classifier(*infer_inputs)
                 ys.append(y_j)
@@ -241,6 +279,10 @@ class CBNN(pl.LightningModule):
     def generate(self, x: torch.Tensor):
         mu, log_var = self.context_encoder(x)
         z = self.sample(mu, log_var)
+
+        if self.split_recons_infer_latents is not None:
+            z = z[..., :int(self.split_recons_infer_latents * z.size(-1))]
+
         x_recon = self.context_decoder(z)
         return x_recon
     
@@ -281,6 +323,7 @@ class CBNN(pl.LightningModule):
         w_kld_weight = kwargs['w_kld_weight'] if 'w_kld_weight' in kwargs else self.w_kld_weight
         ic_mi_weight = kwargs['ic_mi_weight'] if 'ic_mi_weight' in kwargs else self.ic_mi_weight
         wc_mi_weight = kwargs['wc_mi_weight'] if 'wc_mi_weight' in kwargs else self.wc_mi_weight
+        context_split_mi_weight = kwargs['context_split_mi_weight'] if 'context_split_mi_weight' in kwargs else self.context_split_mi_weight
         
         # Main inference loss
         infer_loss = torch.nn.functional.cross_entropy(y_recon, y_target)
@@ -320,36 +363,40 @@ class CBNN(pl.LightningModule):
             w_kld_loss = torch.tensor(0.0).to(x.device)
             w_kld_var = torch.tensor(0.0).to(x.device)
 
+        # Latent split Mutual Information loss
+        context_split_mi_loss = torch.tensor(0.0).to(x.device)
+        if self.split_recons_infer_latents is not None:
+            context_z = torch.cat(context_z_samples, dim=0)
+            recons_context_z = context_z[..., :int(self.split_recons_infer_latents * context_z.size(-1))]
+            infer_context_z = context_z[..., int(self.split_recons_infer_latents * context_z.size(-1)):]
+            context_split_mi_loss = gaussian_mutual_information(recons_context_z, infer_context_z, top_k=16)
 
         # Inference-Context Mutual Information loss
+        ic_mi_loss = torch.tensor(0.0).to(x.device)
         if self.ic_mi_weight > 0.0:
-            ic_mi_loss = gaussian_mutual_information(torch.cat(z_samples, dim=0), torch.cat(context_z_samples, dim=0), max_dim=128, boost_coefficients=0.6)
-            if torch.isnan(ic_mi_loss) or torch.isinf(ic_mi_loss):
-                ic_mi_loss = torch.tensor(0.0).to(x.device)
-        else:
-            ic_mi_loss = torch.tensor(0.0).to(x.device)
+            ic_mi_loss = gaussian_mutual_information(torch.cat(z_samples, dim=0), torch.cat(context_z_samples, dim=0),  top_k=16)
 
         # Weights-Context Mutual Information loss
+        wc_mi_loss = torch.tensor(0.0).to(x.device)
         if self.wc_mi_weight > 0.0:
-            wc_mi_loss = gaussian_mutual_information(torch.cat([w.view(1,-1).repeat(context_z_samples[0].size(0) // self.w_samples, 1) for w in weight_samples], dim=0), torch.cat(context_z_samples, dim=0), max_dim=32, boost_coefficients=0.225)
-            if torch.isnan(wc_mi_loss) or torch.isinf(wc_mi_loss):
-                wc_mi_loss = torch.tensor(0.0).to(x.device)
-        else:
-            wc_mi_loss = torch.tensor(0.0).to(x.device)
+            repeated_w = torch.cat([w.view(1,-1).repeat(context_z_samples[0].size(0) // self.w_samples, 1) for w in weight_samples], dim=0)
+            context_z = torch.cat(context_z_samples, dim=0)
+            wc_mi_loss = gaussian_mutual_information(repeated_w, context_z, max_dim=128, top_k=16)
 
+        # L2 weight regularisation
+        l2_loss = torch.tensor(0.0).to(x.device)
         if self.l2_regularisation > 0.0:
             l2_loss = torch.cat([w.view(-1) for w in weight_samples]).pow(2).sum() / (2 * len(weight_samples))
-        else:
-            l2_loss = torch.tensor(0.0).to(x.device)
 
 
-        loss = infer_loss + recons_weight * recons_loss + context_kld_weight * context_kld_loss + kld_weight * kld_loss + w_kld_weight * w_kld_loss + ic_mi_weight * ic_mi_loss + wc_mi_weight * wc_mi_loss + self.l2_regularisation * l2_loss
+        loss = infer_loss + recons_weight * recons_loss + context_kld_weight * context_kld_loss + kld_weight * kld_loss + w_kld_weight * w_kld_loss + context_split_mi_weight * context_split_mi_loss + ic_mi_weight * ic_mi_loss + wc_mi_weight * wc_mi_loss + self.l2_regularisation * l2_loss
         return {'loss': loss, 
                 'Inference_Loss':infer_loss.detach(), 
                 'Reconstruction_Loss':recons_loss.detach(), 
                 'Context_KLD':-context_kld_loss.detach(),
                 'Weights_KLD':-w_kld_loss.detach(),
                 'KLD':-kld_loss.detach(), 
+                'Context_Split_MI':context_split_mi_loss.detach(),
                 'IC_MI':ic_mi_loss.detach(), 
                 'WC_MI':wc_mi_loss.detach(),
                 'L2': l2_loss.detach(),
@@ -484,9 +531,9 @@ class CNN_CBNN(CBNN):
         
         # Build modules
         self.context_encoder = CNNVariationalEncoder(in_channels, image_dim, latent_dim, encoder_hidden_dims)
-        self.context_decoder = CNNVariationalDecoder(latent_dim, in_channels, image_dim, encoder_hidden_dims[::-1] if encoder_hidden_dims is not None else None)
+        self.context_decoder = CNNVariationalDecoder(self.recons_latent_dim, in_channels, image_dim, encoder_hidden_dims[::-1] if encoder_hidden_dims is not None else None)
         self.inference_encoder = CNNVariationalEncoder(in_channels, image_dim, latent_dim, encoder_hidden_dims)
-        self.inference_classifier = BayesianClassifier(2 * self.nb_input_images * latent_dim, out_channels, classifier_hidden_dim, classifier_nb_layers)
+        self.inference_classifier = BayesianClassifier(2 * self.nb_input_images * self.infer_latent_dim, out_channels, classifier_hidden_dim, classifier_nb_layers)
 
     
     @classmethod
@@ -523,9 +570,9 @@ class MCQA_CNN_CBNN(CBNN):
         
         # Build modules
         self.context_encoder = CNNVariationalEncoder(in_channels, image_dim, latent_dim, encoder_hidden_dims)
-        self.context_decoder = CNNVariationalDecoder(latent_dim, in_channels, image_dim, encoder_hidden_dims[::-1] if encoder_hidden_dims is not None else None)
+        self.context_decoder = CNNVariationalDecoder(self.recons_latent_dim, in_channels, image_dim, encoder_hidden_dims[::-1] if encoder_hidden_dims is not None else None)
         self.inference_encoder = CNNVariationalEncoder(in_channels, image_dim, latent_dim, encoder_hidden_dims)
-        self.inference_classifier = MCQABayesClassifier(2 * self.nb_input_images * latent_dim, classifier_hidden_dim, classifier_nb_layers, self.nb_input_images-out_channels, out_channels)
+        self.inference_classifier = MCQABayesClassifier(2 * self.nb_input_images * self.infer_latent_dim, classifier_hidden_dim, classifier_nb_layers, self.nb_input_images-out_channels, out_channels)
 
     
     @classmethod
@@ -565,9 +612,9 @@ class ResNet_CBNN(CBNN):
         
         # Build modules
         self.context_encoder = CNNVariationalEncoder(in_channels, image_dim, latent_dim, encoder_hidden_dims)
-        self.context_decoder = CNNVariationalDecoder(latent_dim, in_channels, image_dim, encoder_hidden_dims[::-1] if encoder_hidden_dims is not None else None)
+        self.context_decoder = CNNVariationalDecoder(self.recons_latent_dim, in_channels, image_dim, encoder_hidden_dims[::-1] if encoder_hidden_dims is not None else None)
         self.inference_encoder = None
-        self.inference_classifier = bayes_resnet18_invariant(in_channels, num_classes, latent_dim, image_size=image_dim)
+        self.inference_classifier = bayes_resnet18_invariant(in_channels, num_classes, self.infer_latent_dim, image_size=image_dim)
     
     @classmethod
     def add_model_specific_args(cls, parent_parser):
@@ -604,9 +651,9 @@ class MCQA_ResNet_CBNN(CBNN):
         
         # Build modules
         self.context_encoder = CNNVariationalEncoder(in_channels, image_dim, latent_dim, encoder_hidden_dims)
-        self.context_decoder = CNNVariationalDecoder(latent_dim, in_channels, image_dim, encoder_hidden_dims[::-1] if encoder_hidden_dims is not None else None)
+        self.context_decoder = CNNVariationalDecoder(self.recons_latent_dim, in_channels, image_dim, encoder_hidden_dims[::-1] if encoder_hidden_dims is not None else None)
         self.inference_encoder = None
-        self.inference_classifier = mcqa_bayes_resnet18_invariant(in_channels, self.nb_input_images, latent_dim, num_classes, latent_dim, image_size=image_dim)
+        self.inference_classifier = mcqa_bayes_resnet18_invariant(in_channels, self.nb_input_images, self.infer_latent_dim, num_classes, self.infer_latent_dim, image_size=image_dim)
     
     @classmethod
     def add_model_specific_args(cls, parent_parser):
@@ -643,9 +690,9 @@ class MIPred_ResNet_CBNN(CBNN):
         
         # Build modules
         self.context_encoder = CNNVariationalEncoder(in_channels, image_dim, latent_dim, encoder_hidden_dims)
-        self.context_decoder = CNNVariationalDecoder(latent_dim, in_channels, image_dim, encoder_hidden_dims[::-1] if encoder_hidden_dims is not None else None)
+        self.context_decoder = CNNVariationalDecoder(self.recons_latent_dim, in_channels, image_dim, encoder_hidden_dims[::-1] if encoder_hidden_dims is not None else None)
         self.inference_encoder = None
-        self.inference_classifier = mipred_bayes_resnet18_invariant(in_channels, self.nb_input_images, latent_dim, num_classes, latent_dim, image_size=image_dim)
+        self.inference_classifier = mipred_bayes_resnet18_invariant(in_channels, self.nb_input_images, self.infer_latent_dim, num_classes, self.infer_latent_dim, image_size=image_dim)
     
     @classmethod
     def add_model_specific_args(cls, parent_parser):

@@ -65,7 +65,8 @@ def sample_images(model : torch.nn.Module, data : torch.Tensor, log_dir : str, l
                         nrow=12)
     
         # Generate samples
-        samples = model.decode(torch.randn(num_samples,model.latent_dim).to(device))
+        latent_dim = model.recons_latent_dim if hasattr(model, 'recons_latent_dim') else model.latent_dim
+        samples = model.decode(torch.randn(num_samples,latent_dim).to(device))
         if samples.shape[1] > 3:
             samples = tensor_to_rgb(samples)
 

@@ -1,5 +1,4 @@
 
-import math
 from typing import Optional
 
 import torch
@@ -34,8 +33,13 @@ def correlation_coefficient(samples : torch.Tensor):
     # Compute the correlation coefficient
     return covariance / torch.ger(std, std) # [F x F] / [F x F] -> [F x F]
 
+def smooth_abs(x : torch.Tensor, beta : float = 1e-4):
+    """
+    Compute the smooth absolute value of x, i.e. sqrt(x^2 + beta^2)
+    """
+    return torch.sqrt(x**2 + beta**2)
 
-def gaussian_mutual_information(samples_p : torch.Tensor, samples_q : torch.Tensor, max_dim : Optional[int] = 128, boost_coefficients : float = 0.8):
+def gaussian_mutual_information(samples_p : torch.Tensor, samples_q : torch.Tensor, max_dim : Optional[int] = None, boost_coefficients : Optional[float] = None, top_k : Optional[int] = None):
     """
     Compute the mutual information between two sets of samples [B x P] and [B x Q]. It is assumed that the samples are drawn from a joint Gaussian multivariate distribution.
     [1] MacKay, David JC. Information theory, inference and learning algorithms. Cambridge university press, 2003. (Chapter 11).
@@ -52,7 +56,8 @@ def gaussian_mutual_information(samples_p : torch.Tensor, samples_q : torch.Tens
     correlations = correlation_coefficient(torch.cat([samples_p - samples_p.mean(0), samples_q - samples_q.mean(0)], dim=1)) # [B x (P + Q)] -> [(P + Q) x (P + Q)]
 
     # Boost coefficients to avoid numerical instability
-    correlations = correlations.sign() * correlations.abs()**(1/(1+boost_coefficients))
+    if boost_coefficients is not None:
+        correlations = correlations.sign() * correlations.abs()**(1/(1+boost_coefficients))
 
     # Detach inter-distribution correlations (we are not interested in the mutual information between the dimensions of the same distribution)
     mask = torch.ones_like(correlations)
@@ -62,8 +67,14 @@ def gaussian_mutual_information(samples_p : torch.Tensor, samples_q : torch.Tens
 
     correlations = correlations * mask + (correlations * mask_rev).detach()
 
-    # Compute the mutual information using the determinant of the correlation matrix, return the square for optimization purposes
-    return (-0.5 * torch.det(correlations).abs().log())**2 # [(P + Q) x (P + Q)] -> [1]
+    # Keep rows with highest gradient (i.e. highest correlation coefficients)
+    if top_k is not None:
+        keep_idx = torch.topk((correlations * mask).abs().sum(dim=0), top_k, dim=0).indices
+        correlations = correlations[keep_idx][:,keep_idx]
+
+    # Compute the mutual information using the determinant of the correlation matrix, return the smooth absolute value for optimization purposes (we are mot interestedin the sign of the information), similarly use the smooth absolute value of the determinant to avoid numerical instability
+    return smooth_abs(-0.5 * smooth_abs(torch.det(correlations)).log()) # [(P + Q) x (P + Q)] -> [1]
+
 
 
 
