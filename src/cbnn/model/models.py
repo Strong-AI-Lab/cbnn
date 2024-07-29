@@ -2,7 +2,7 @@
 from .cbnn import CNN_CBNN, MCQA_CNN_CBNN, ResNet_CBNN, MCQA_ResNet_CBNN, MIPred_ResNet_CBNN
 from .vae import CNNVAE, CNNVAEClassifier
 from .resnet import ResNet18, MCQAResNet18, MIPredResNet18
-from .vit import VITB16, MIPredVITB16
+from .vit import VITB16, VITB32, VITL16, VITL32, VITH14, MIPredVITB16, MIPredVITB32, MIPredVITL16, MIPredVITL32, MIPredVITH14
 
 
 MODELS = {
@@ -18,6 +18,14 @@ MODELS = {
     'mipred_resnet18': MIPredResNet18,
     'vitb16': VITB16,
     'mipred_vitb16': MIPredVITB16,
+    'vitb32': VITB32,
+    'mipred_vitb32': MIPredVITB32,
+    'vitl16': VITL16,
+    'mipred_vitl16': MIPredVITL16,
+    'vitl32': VITL32,
+    'mipred_vitl32': MIPredVITL32,
+    'vith14': VITH14,
+    'mipred_vith14': MIPredVITH14,
 }
 
 def add_model_specific_args(parent_parser):
