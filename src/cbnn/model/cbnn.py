@@ -6,7 +6,7 @@ from .modules.decoders import CNNVariationalDecoder
 from .modules.classifiers import BayesianClassifier, MCQABayesClassifier
 from .modules.bayes_resnet_utils import bayes_resnet18_invariant, mcqa_bayes_resnet18_invariant, mipred_bayes_resnet18_invariant
 from ..trainer.losses import normal_kullback_leibler_divergence, gaussian_mutual_information
-from .utils import sample_images
+from .utils import sample_images, INFERENCE_CONTEXT_COLLATORS
 
 import torch
 import pytorch_lightning as pl
@@ -38,6 +38,7 @@ class CBNN(pl.LightningModule):
             reverse_freeze : bool = False,
             split_recons_infer_latents : Optional[float] = None,
             context_split_mi_weight : float = 1.0,
+            inference_context_collator : str = "cat",
             **kwargs
             ):
         super(CBNN, self).__init__()
@@ -79,6 +80,9 @@ class CBNN(pl.LightningModule):
             "val" : None,
             "test" : None
         }
+
+        # Context collator
+        self.inference_context_collator = INFERENCE_CONTEXT_COLLATORS[inference_context_collator]
 
         self._init_modules(**kwargs)
 
@@ -203,10 +207,10 @@ class CBNN(pl.LightningModule):
             context_log_vars = [c_log_var.view(batch_size, self.nb_input_images * c_log_var.size(-1)) for c_log_var in context_log_vars]
 
         x_recons = []
-        ys = []
-        ws = []
         context_zs = []
         zs = []
+        infer_context_zs = []
+        infer_zs = []
         for i in range(self.z_samples): # sample z from context and inference latent variables
             c_idx = i if i < len(context_mus) else -1
             if self.inverse_context:
@@ -236,37 +240,36 @@ class CBNN(pl.LightningModule):
             zs.append(z)
 
             
-            if self.split_recons_infer_latents is not None:
+            if self.split_recons_infer_latents is not None: # If option is selected, split latent space for reconstruction and inference (extract first part for reconstruction)
                 recon_context_z = context_z[..., :int(self.split_recons_infer_latents * context_z.size(-1))]
             else:
                 recon_context_z = context_z
 
-            if self.nb_input_images > 1:                    
-                recon_context_z = recon_context_z.view(batch_size * self.nb_input_images, -1)
-                x_recon = self.context_decoder(recon_context_z)
-                x_recon = x_recon.view(batch_size, self.nb_input_images, *x_recon.size()[1:])
-            else:
-                x_recon = self.context_decoder(recon_context_z)
+            if self.recon_weight > 0.0: # Perform reconstruction
+                if self.nb_input_images > 1:
+                    recon_context_z = recon_context_z.view(batch_size * self.nb_input_images, -1)
+                    x_recon = self.context_decoder(recon_context_z)
+                    x_recon = x_recon.view(batch_size, self.nb_input_images, *x_recon.size()[1:])
+                else:
+                    x_recon = self.context_decoder(recon_context_z)
 
-            x_recons.append(x_recon)
+                x_recons.append(x_recon)
 
-            if self.split_recons_infer_latents is not None:
+            if self.split_recons_infer_latents is not None: # If option is selected, split latent space for reconstruction and inference (extract second part for inference)
                 infer_context_z = context_z[..., int(self.split_recons_infer_latents * context_z.size(-1)):]
             else:
                 infer_context_z = context_z
 
-            for _ in range(self.w_samples): # sample weights from the classifier
-                if not self.inference_without_encoder:
-                    try:
-                        infer_inputs = [torch.cat([z, infer_context_z], dim=-1)]
-                    except RuntimeError:
-                        infer_inputs = [z, infer_context_z]
-                else:
-                    infer_inputs = [z, infer_context_z]
+            infer_context_zs.append(infer_context_z)
+            infer_zs.append(z)
 
-                y_j, *w_j = self.inference_classifier(*infer_inputs)
-                ys.append(y_j)
-                ws.append(torch.cat([w.view(-1) for w in w_j], dim=0))
+
+        ys = []
+        ws = []
+        for _ in range(self.w_samples): # sample weights from the classifier and perform inference
+            y_j, *w_j = self.inference_context_collator(infer_zs, infer_context_zs, self.inference_classifier)
+            ys.append(y_j)
+            ws.append(torch.cat([w.view(-1) for w in w_j], dim=0))
 
         y = torch.stack(ys).mean(dim=0)
 
@@ -597,7 +600,9 @@ class ResNet_CBNN(CBNN):
     def __init__(self, **kwargs):
         if 'inference_without_encoder' in kwargs:
             kwargs.pop('inference_without_encoder')
-        super(ResNet_CBNN, self).__init__(inference_without_encoder=True, **kwargs)
+        if 'inference_context_collator' in kwargs:
+            kwargs.pop('inference_context_collator')
+        super(ResNet_CBNN, self).__init__(inference_without_encoder=True, inference_context_collator='none', **kwargs)
 
 
     def _init_modules(self,
@@ -636,7 +641,9 @@ class MCQA_ResNet_CBNN(CBNN):
     def __init__(self, **kwargs):
         if 'inference_without_encoder' in kwargs:
             kwargs.pop('inference_without_encoder')
-        super(MCQA_ResNet_CBNN, self).__init__(inference_without_encoder=True, **kwargs)
+        if 'inference_context_collator' in kwargs:
+            kwargs.pop('inference_context_collator')
+        super(ResNet_CBNN, self).__init__(inference_without_encoder=True, inference_context_collator='none', **kwargs)
 
 
     def _init_modules(self,
@@ -675,7 +682,9 @@ class MIPred_ResNet_CBNN(CBNN):
     def __init__(self, **kwargs):
         if 'inference_without_encoder' in kwargs:
             kwargs.pop('inference_without_encoder')
-        super(MIPred_ResNet_CBNN, self).__init__(inference_without_encoder=True, **kwargs)
+        if 'inference_context_collator' in kwargs:
+            kwargs.pop('inference_context_collator')
+        super(ResNet_CBNN, self).__init__(inference_without_encoder=True, inference_context_collator='none', **kwargs)
 
 
     def _init_modules(self,

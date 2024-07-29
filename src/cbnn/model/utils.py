@@ -1,5 +1,6 @@
 
 import os
+from typing import Callable, List
 
 import torch
 from torch.utils.data import DataLoader
@@ -80,3 +81,112 @@ def sample_images(model : torch.nn.Module, data : torch.Tensor, log_dir : str, l
     
     except StopIteration:
         pass
+
+
+
+
+
+def average_collage_optim(input_collator : Callable): # to use carefully, can lead to poor performance if classifier uses batch normalisation
+    def collate_fn(zs : List[torch.Tensor], z_cs : List[torch.Tensor], classifier : Callable):
+        context_size = len(zs)
+        batch_size = zs[0].shape[0]
+        z = torch.cat(zs, dim=0)
+        z_c = torch.cat(z_cs, dim=0)
+        inputs = input_collator(z, z_c, classifier)
+        outputs, *w = classifier(*inputs)
+        outputs = outputs.view(context_size, batch_size, -1).mean(dim=0)
+        return outputs, *w
+
+    return collate_fn
+
+def average_collage(input_collator : Callable):
+    def collate_fn(zs : List[torch.Tensor], z_cs : List[torch.Tensor], classifier : Callable):
+        outputs = []
+        ws = []
+        for i in range(len(zs)):
+            inputs = input_collator(zs[i], z_cs[i], classifier)
+            output, *w = classifier(*inputs)
+            outputs.append(output)
+            ws.extend(w)
+        outputs = torch.stack(outputs).mean(dim=0)
+        return outputs, *ws
+
+    return collate_fn  
+
+
+@average_collage
+def cat_collator(z : torch.Tensor, z_c : torch.Tensor, classifier : Callable):
+    return [torch.cat([z, z_c], dim=-1)]
+
+@average_collage
+def sum_collator(z : torch.Tensor, z_c : torch.Tensor, classifier : Callable):
+    return [z + z_c]
+
+@average_collage
+def mul_collator(z : torch.Tensor, z_c : torch.Tensor, classifier : Callable):
+    return [z * z_c]
+
+@average_collage
+def sub_collator(z : torch.Tensor, z_c : torch.Tensor, classifier : Callable):
+    return [z - z_c]
+
+@average_collage
+def none_collator(z : torch.Tensor, z_c : torch.Tensor, classifier : Callable):
+    return [z, z_c]
+
+
+def cross_product(zs : List[torch.Tensor]):
+    if len(zs) != zs[0].size(-1) -1:
+        raise ValueError(f"Cross collator uses the generalised cross product and requires to have n-1 vectors of size n, had {len(zs)} vectors of size {zs[0].size(-1)}")
+    dim = zs[0].size(-1)
+    
+    context = torch.stack(zs, dim=1) # [B, n-1, n]
+
+    # Normalise the context matrices
+    context = context / torch.norm(context, dim=0, keepdim=True)
+
+    # Compute the cross product of the context matrices
+    submatrices = torch.stack([context[:,:,torch.arange(dim)!=i] for i in range(dim)]).permute(1, 0, 2, 3) # [B, n, n-1, n-1]
+    dets = torch.linalg.det(submatrices) # [B, n]
+    print(dets.min(), dets.max(), torch.isnan(dets).sum(), torch.isinf(dets).sum())
+    cross = dets * (-torch.pow(-1, torch.arange(dets.size(1),device=dets.device))).view(1,-1) # [B, n]
+
+    return cross
+
+
+def cross_collage(input_collator : Callable):
+    def collate_fn(zs : List[torch.Tensor], z_cs : List[torch.Tensor], classifier : Callable):
+        z_cs = cross_product(z_cs) # [B, n] * C -> [B, n]
+        z_cs = z_cs.unsqueeze(1).repeat(1, len(zs), 1).unbind(dim=1) # [B, n] -> [B, n] * C
+        return input_collator(zs, z_cs, classifier)
+    
+    return collate_fn
+
+
+@cross_collage
+@average_collage
+def cross_cat_collator(z : torch.Tensor, z_c : torch.Tensor, classifier : Callable):
+    return [torch.cat([z, z_c], dim=-1)]
+
+@cross_collage
+@average_collage
+def cross_sum_collator(z : torch.Tensor, z_c : torch.Tensor, classifier : Callable):
+    return [z + z_c]
+
+@cross_collage
+@average_collage
+def cross_mul_collator(z : torch.Tensor, z_c : torch.Tensor, classifier : Callable):
+    return [z * z_c]
+
+
+
+INFERENCE_CONTEXT_COLLATORS = {
+    "cat" : cat_collator,
+    "sum" : sum_collator,
+    "mul" : mul_collator,
+    "sub" : sub_collator,
+    "none" : none_collator,
+    "cross_cat" : cross_cat_collator,
+    "cross_sum" : cross_sum_collator,
+    "cross_mul" : cross_mul_collator,
+}
