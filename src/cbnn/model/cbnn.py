@@ -4,6 +4,7 @@ from typing import Optional, List
 from .modules.encoders import CNNVariationalEncoder
 from .modules.decoders import CNNVariationalDecoder
 from .modules.classifiers import BayesianClassifier, MCQABayesClassifier
+from .resnet import ResNet18
 from .modules.bayes_resnet_utils import bayes_resnet18_invariant, mcqa_bayes_resnet18_invariant, mipred_bayes_resnet18_invariant
 from ..trainer.losses import normal_kullback_leibler_divergence, gaussian_mutual_information
 from .utils import sample_images, INFERENCE_CONTEXT_COLLATORS
@@ -715,3 +716,71 @@ class MIPred_ResNet_CBNN(CBNN):
         parser.add_argument('--encoder_hidden_dims', type=int, nargs='+', default=[32, 64, 128, 256, 512], help='Hidden dimensions for the encoder.')
         
         return parent_parser
+
+
+
+
+class ResEnc_CBNN(CBNN):
+    class ResNetEncoder(torch.nn.Module):
+        def __init__(self, resnet : torch.nn.Module, latent_dim : int = 256):
+            super(ResEnc_CBNN.ResNetEncoder, self).__init__()
+            self.resnet_encoder = torch.nn.Sequential(*list(resnet.children())[:-1])
+            self.resnet_encoder = torch.nn.Sequential(*list(resnet.children())[:-1])
+            last_block =  torch.nn.Sequential(*list(self.resnet_encoder[-2][-1].children()))
+            
+            old_conv2 = last_block[-2]
+            old_bn2 = last_block[-1]
+            last_block[-2] = torch.nn.Conv2d(old_conv2.in_channels, 2*latent_dim, kernel_size=old_conv2.kernel_size, stride=old_conv2.stride, padding=old_conv2.padding, bias=old_conv2.bias is not None)
+            last_block[-1] = torch.nn.BatchNorm2d(2*latent_dim, eps=old_bn2.eps, momentum=old_bn2.momentum, affine=old_bn2.affine, track_running_stats=old_bn2.track_running_stats)
+            self.resnet_encoder[-2][-1] = last_block
+
+        def forward(self, x : torch.Tensor):
+            if x.size(-3) == 1:
+                if len(x.size()) == 5: # if multiple input images
+                    x = x.repeat(1, 1, 3, 1, 1)
+                else:
+                    x = x.repeat(1, 3, 1, 1)
+
+            x = self.resnet_encoder(x)
+            mu, log_var = x.view(x.size(0), -1).chunk(2, dim=-1)
+            return mu, log_var
+
+
+    def __init__(self, **kwargs):
+        if 'inference_without_encoder' in kwargs:
+            kwargs.pop('inference_without_encoder')
+        super(ResEnc_CBNN, self).__init__(inference_without_encoder=False, **kwargs)
+
+    def _init_modules(self,
+            in_channels: int = 3,
+            image_dim: int = 64,
+            num_classes: int = 10,
+            latent_dim: int = 256,
+            inference_num_layers: int = 1,
+            decoder_hidden_dims: List = None,
+            **kwargs):
+
+        resnet = ResNet18(in_channels=in_channels, num_classes=num_classes, **kwargs).resnet
+        self.latent_dim = latent_dim
+        self.inference_num_layers = inference_num_layers
+        
+        # Build modules
+        self.context_encoder = ResEnc_CBNN.ResNetEncoder(resnet, latent_dim)
+        self.context_decoder = CNNVariationalDecoder(self.recons_latent_dim, in_channels, image_dim, decoder_hidden_dims)
+        self.inference_encoder = ResEnc_CBNN.ResNetEncoder(resnet, latent_dim)
+        self.inference_classifier = BayesianClassifier(latent_dim*self.nb_input_images, num_classes, latent_dim, inference_num_layers)
+    
+    @classmethod
+    def add_model_specific_args(cls, parent_parser):
+        parent_parser = super(ResEnc_CBNN, cls).add_model_specific_args(parent_parser)
+
+        parser = parent_parser.add_argument_group("ResEnc_CBNN")
+        parser.add_argument('--in_channels', type=int, default=3, help='Number of input channels.')
+        parser.add_argument('--image_dim', type=int, default=64, help='Dimension of the input image. Image is assumed to be square.')
+        parser.add_argument('--num_classes', type=int, default=10, help='Number of classes in the dataset.')
+        parser.add_argument('--latent_dim', type=int, default=256, help='Dimension of the latent space.')
+        parser.add_argument('--inference_num_layers', type=int, default=1, help='Number of layers for the inference classifier.')
+        parser.add_argument('--decoder_hidden_dims', type=int, nargs='+', default=[32, 64, 128, 256, 512], help='Hidden dimensions for the decoder.')
+        
+        return parent_parser
+
