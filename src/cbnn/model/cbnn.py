@@ -194,8 +194,8 @@ class CBNN(pl.LightningModule):
 
         # Encode context
         mu_c, log_var_c = context_encoder(x_c)
-        context_mus = [mu_c[i*(batch_size*self.nb_input_images):(i+1)*(batch_size*self.nb_input_images)] for i in range(self.z_samples)]
-        context_log_vars = [log_var_c[i*(batch_size*self.nb_input_images):(i+1)*(batch_size*self.nb_input_images)] for i in range(self.z_samples)]
+        context_mus = mu_c.chunk(self.z_samples, dim=0)
+        context_log_vars = log_var_c.chunk(self.z_samples, dim=0)
 
         # Encode inference input
         inference_mu, inference_log_var = inference_encoder(x)
@@ -742,7 +742,10 @@ class ResEnc_CBNN(CBNN):
                     x = x.repeat(1, 3, 1, 1)
 
             x = self.resnet_encoder(x)
+            
             mu, log_var = x.view(x.size(0), -1).chunk(2, dim=-1)
+            mu, log_var = mu.contiguous(), log_var.contiguous()
+            
             return mu, log_var
 
 

@@ -135,7 +135,7 @@ def none_collator(z : torch.Tensor, z_c : torch.Tensor, classifier : Callable):
     return [z, z_c]
 
 
-def cross_product(zs : List[torch.Tensor]):
+def cross_product(zs : List[torch.Tensor]) -> torch.Tensor:
     if len(zs) != zs[0].size(-1) -1:
         raise ValueError(f"Cross collator uses the generalised cross product and requires to have n-1 vectors of size n, had {len(zs)} vectors of size {zs[0].size(-1)}")
     dim = zs[0].size(-1)
@@ -148,7 +148,6 @@ def cross_product(zs : List[torch.Tensor]):
     # Compute the cross product of the context matrices
     submatrices = torch.stack([context[:,:,torch.arange(dim)!=i] for i in range(dim)]).permute(1, 0, 2, 3) # [B, n, n-1, n-1]
     dets = torch.linalg.det(submatrices) # [B, n]
-    print(dets.min(), dets.max(), torch.isnan(dets).sum(), torch.isinf(dets).sum())
     cross = dets * (-torch.pow(-1, torch.arange(dets.size(1),device=dets.device))).view(1,-1) # [B, n]
 
     return cross

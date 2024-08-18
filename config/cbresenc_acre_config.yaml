@@ -5,14 +5,14 @@ amp_level: null
 auto_lr_find: false
 auto_scale_batch_size: false
 auto_select_gpus: null
-batch_size: 64
+batch_size: 8
 benchmark: null
 check_val_every_n_epoch: 1
 context_inference_weight: 0.4
 context_split_mi_weight: 0.0
 context_kld_weight: 1.0e-07
-data: CIFAR10
-data_dir: data/CIFAR10/
+data: ACRE
+data_dir: data/ACRE/
 default_root_dir: null
 detect_anomaly: false
 devices: '1'
@@ -30,7 +30,7 @@ gpus: null
 gradient_clip_algorithm: null
 gradient_clip_val: null
 ic_mi_weight: 0.0
-image_dim: 32
+image_dim: 256
 in_channels: 3
 inference_context_collator: sum
 inference_mode: true
@@ -57,8 +57,8 @@ mode: inference
 model: cbresenc
 move_metrics_to_cpu: false
 multiple_trainloader_mode: max_size_cycle
-nb_input_images: 1
-num_classes: 10
+nb_input_images: 7
+num_classes: 3
 num_nodes: 1
 num_processes: null
 num_sanity_val_steps: 2
@@ -73,7 +73,7 @@ replace_sampler_ddp: true
 resume_from_checkpoint: null
 sample_context_from_distribution: true
 save: null
-split: null
+split: IID
 split_recons_infer_latents: null
 strategy: null
 sync_batchnorm: false
@@ -85,8 +85,8 @@ train_and_test: false
 train_val_split: 0.2
 val_check_interval: null
 w_kld_weight: 1.0e-07
-w_samples: 8
+w_samples: 16
 wandb_project: cbnn
 wc_mi_weight: 0.0
 weight_decay: 1.0e-04
-z_samples: 8
+z_samples: 32
