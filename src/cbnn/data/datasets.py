@@ -6,6 +6,9 @@ import numpy as np
 import requests
 import tqdm
 
+from .utils import SquarePad
+
+import deeplake
 import torch
 from torchvision import datasets, transforms, io
 import torchvision.transforms.v2 as transforms_v2
@@ -110,13 +113,13 @@ class BaseDataModule(pl.LightningDataModule):
         raise NotImplementedError()
 
     def train_dataloader(self):
-        return data_utils.DataLoader(self.train_data, batch_size=self.batch_size, num_workers=self.num_workers, shuffle=True)
+        return data_utils.DataLoader(self.train_data, batch_size=self.batch_size, num_workers=self.num_workers, shuffle=True, drop_last=True)
 
     def val_dataloader(self):
-        return data_utils.DataLoader(self.val_data, batch_size=self.batch_size, num_workers=self.num_workers, shuffle=True)
+        return data_utils.DataLoader(self.val_data, batch_size=self.batch_size, num_workers=self.num_workers, shuffle=True, drop_last=True)
 
     def test_dataloader(self):
-        return data_utils.DataLoader(self.test_data, batch_size=self.batch_size, num_workers=self.num_workers, shuffle=True)
+        return data_utils.DataLoader(self.test_data, batch_size=self.batch_size, num_workers=self.num_workers, shuffle=True, drop_last=True)
     
 
 
@@ -207,6 +210,121 @@ class CIFAR10OODDataModule(CIFAR10DataModule):
             self._subset_data(train=True, val=True)
         elif stage == "test":
             self.test_data = datasets.CIFAR10(self.data_dir, train=False, transform=self.transform_shift)
+
+
+
+class OfficeHomeDataModule(BaseDataModule):
+    CATEGORIES = {
+        'RealWorld' : (0,4357),     # 4357 samples
+        'Product' : (4357,8796),    # 4440 samples
+        'Art' : (8796,11223),       # 2427 samples
+        'Clipart' : (11223,15588)   # 4365 samples
+    }
+    CATEGORIES_NORM = {
+        'RealWorld' : ((0.4609, 0.4380, 0.4132), (0.3798, 0.3737, 0.3746)),
+        'Product' : ((0.6289, 0.6189, 0.6117), (0.4103, 0.4093, 0.4117)),
+        'Art' : ((0.3868, 0.3618, 0.3336), (0.3571, 0.3458, 0.3380)),
+        'Clipart' : ((0.4371, 0.4221, 0.4032), (0.4396, 0.4315, 0.4320))
+    }
+    URL = 'hub://activeloop/'
+    NAME = 'office-home-domain-adaptation'
+
+    def _process_data(self, data : deeplake.Dataset, transform : Callable):
+        images = data.images.data(aslist=True)['value']
+        labels = data.domain_objects.data(aslist=True)['value']
+
+        images = [transform(image) for image in images]
+        labels = [int(label[0]) for label in labels]
+
+        return list(zip(images, labels))
+
+    def __init__(self, **kwargs):
+        super(OfficeHomeDataModule, self).__init__(**kwargs)
+
+        self.train_category, self.test_category = None, None
+        if len(self.distribution_split.split('_')) == 2:
+            self.train_category, self.test_category = self.distribution_split.split('_')
+
+        base_transform = transforms.Compose([
+            transforms.ToTensor(),
+            SquarePad(),
+            transforms_v2.Resize((256, 256))
+        ])
+
+        if self.train_category is None:
+            self.transform = transforms.Compose([
+                base_transform,
+                transforms_v2.Normalize(*OfficeHomeDataModule.CATEGORIES_NORM[self.distribution_split])
+            ])
+        else:
+            self.transform = transforms.Compose([
+                base_transform,
+                transforms_v2.Normalize(*OfficeHomeDataModule.CATEGORIES_NORM[self.train_category])
+            ])
+            self.test_transform = transforms.Compose([
+                base_transform,
+                transforms_v2.Normalize(*OfficeHomeDataModule.CATEGORIES_NORM[self.test_category])
+            ])
+
+        self.train_idxs = None
+        self.val_idxs = None
+        self.test_idxs = None
+        self.train_data = None
+        self.val_data = None
+        self.test_data = None
+
+    def prepare_data(self):
+        if not os.path.exists(os.path.join(self.data_dir, OfficeHomeDataModule.NAME)):
+            # Download data
+            deeplake.deepcopy(os.path.join(OfficeHomeDataModule.URL, OfficeHomeDataModule.NAME), os.path.join(self.data_dir, OfficeHomeDataModule.NAME))
+        
+        self.dl_data = deeplake.load(os.path.join(self.data_dir, OfficeHomeDataModule.NAME))
+
+    def setup(self, stage=None):
+        if self.train_idxs is None:
+            np.random.seed(42) # Set seed for reproducibility
+
+            if self.train_category is not None:
+                train_idx_range = OfficeHomeDataModule.CATEGORIES[self.train_category]
+                test_idx_range = OfficeHomeDataModule.CATEGORIES[self.test_category]
+
+                train_idxs = range(train_idx_range[0], train_idx_range[1])
+                val_idxs = np.random.choice(train_idxs, int(len(train_idxs) * self.train_val_split), replace=False).tolist()
+                train_idxs = np.setdiff1d(train_idxs, val_idxs).tolist()
+
+                test_idxs = range(test_idx_range[0], test_idx_range[1])
+                test_idxs = np.random.choice(test_idxs, int(len(test_idxs) * self.train_val_split), replace=False).tolist()
+
+                self.train_idxs = train_idxs
+                self.val_idxs = val_idxs
+                self.test_idxs = test_idxs
+
+            else:
+                idx_range = OfficeHomeDataModule.CATEGORIES[self.distribution_split]
+                
+                train_idxs = range(idx_range[0], idx_range[1])
+                val_idxs = np.random.choice(train_idxs, int(len(train_idxs) * self.train_val_split), replace=False).tolist()
+                train_idxs = np.setdiff1d(train_idxs, val_idxs).tolist()
+
+                test_idxs = np.random.choice(train_idxs, int(len(train_idxs) * self.train_val_split / (1 - self.train_val_split)), replace=False).tolist()
+                train_idxs = np.setdiff1d(train_idxs, test_idxs).tolist()
+
+                self.train_idxs = train_idxs
+                self.val_idxs = val_idxs
+                self.test_idxs = test_idxs
+
+        if stage == "fit":
+            self.train_data = self._process_data(self.dl_data[self.train_idxs], self.transform)
+            self.val_data = self._process_data(self.dl_data[self.val_idxs], self.transform)
+
+        elif stage == "test":
+            if self.test_category is not None:
+                transform = self.test_transform
+            else:
+                transform = self.transform
+            
+            self.test_data = self._process_data(self.dl_data[self.test_idxs], transform)
+
 
 
 
@@ -572,6 +690,7 @@ DATASETS = {
     "MNIST_OOD": MNISTOODDataModule,
     "CIFAR10": CIFAR10DataModule,
     "CIFAR10_OOD": CIFAR10OODDataModule,
+    "OFFICEHOME": OfficeHomeDataModule,
     "ACRE": ACREDataModule,
     "CONCEPTARC": ConceptARCDataModule,
     "RAVEN": RAVENDataModule
