@@ -45,6 +45,7 @@ num_processes: null
 num_sanity_val_steps: 2
 num_workers: 4
 overfit_batches: 0.0
+perturbation: 0.6
 plugins: null
 precision: 32
 pretrained: False

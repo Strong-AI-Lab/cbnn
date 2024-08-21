@@ -65,6 +65,7 @@ class BaseDataModule(pl.LightningDataModule):
                 train_val_split: int = DEFAULT_VALIDATION_SPLIT, 
                 pre_transform : bool = False,
                 subset_prop : float = 1.0,
+                perturbation : Optional[float] = None,
                 **kwargs):
         super(BaseDataModule, self).__init__()        
         self.data_dir = data_dir
@@ -78,6 +79,7 @@ class BaseDataModule(pl.LightningDataModule):
         self.val_data = []
         self.pre_transform = pre_transform
         self.subset_prop = subset_prop
+        self.perturbation = perturbation
 
     def _split_train_val_data(self, data):
         train, val = data_utils.random_split(data, [int(len(data) * (1 - self.train_val_split)), int(len(data) * self.train_val_split)])
@@ -104,6 +106,7 @@ class BaseDataModule(pl.LightningDataModule):
         parser.add_argument("--mode", type=str, default="inference", help="Optional. Mode of the data module (inference/generation). Used only if the dataset contains multiple images per input. In inference mode, an extra dimension is added to the input to represent the sequence of images. In generation mode, the input is a single image and the output is an auxiliary task requiring a single image.")
         parser.add_argument("--pre_transform", action="store_true", help="Optional. If applicable and specified, the data is pre-transformed during initialization. it speeds up training for datasets with time-intensive transformations for a larger memory use.")
         parser.add_argument("--subset_prop", type=float, default=1.0, help="Optional. Proportion of the dataset to use. If specified, the dataset is subsetted to the specified proportion.")
+        parser.add_argument("--perturbation", type=float, default=None, help="Optional. Perturbation to apply to the data. If specified, the data is perturbed by the specified amount. Only defined for MNIST and CIFAR-10 o.o.d datasets.")
         return parent_parser
 
     def prepare_data(self):
@@ -154,8 +157,13 @@ class MNISTDataModule(BaseDataModule):
 class MNISTOODDataModule(MNISTDataModule):
     def __init__(self, **kwargs):
         super(MNISTOODDataModule, self).__init__(**kwargs)
+        if self.perturbation is not None:
+            shift = self.perturbation
+        else:
+            shift = 0.1
+
         self.transform_shift = transforms.Compose([
-            transforms.RandomAffine(0, translate=(0.1, 0.1)),
+            transforms.RandomAffine(0, translate=(shift, shift)),
             transforms.ToTensor(),
             transforms.Pad(2),
             transforms.Normalize((0.1307,), (0.3081,))
@@ -197,8 +205,13 @@ class CIFAR10DataModule(BaseDataModule):
 class CIFAR10OODDataModule(CIFAR10DataModule):
     def __init__(self, **kwargs):
         super(CIFAR10OODDataModule, self).__init__(**kwargs)
+        if self.perturbation is not None:
+            shift = self.perturbation
+        else:
+            shift = 0.1
+
         self.transform_shift = transforms.Compose([
-            transforms.RandomAffine(0, translate=(0.1, 0.1)),
+            transforms.RandomAffine(0, translate=(shift, shift)),
             transforms.ToTensor(),
             transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5))
         ])
