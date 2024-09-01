@@ -10,7 +10,7 @@ benchmark: null
 check_val_every_n_epoch: 1
 context_inference_weight: 0.4
 context_split_mi_weight: 0.0
-context_kld_weight: 1.0e-07
+context_kld_weight: 1.0e-06
 data: OFFICEHOME
 data_dir: ./data/OFFICEHOME/
 default_root_dir: null
@@ -37,10 +37,10 @@ inference_mode: true
 inference_num_layers: 1
 inverse_context: false
 ipus: null
-kld_weight: 1.0e-07
+kld_weight: 1.0e-06
 l2_regularisation: 0.0
-latent_dim: 64
-learning_rate: 0.005
+latent_dim: 256
+learning_rate: 0.01
 limit_predict_batches: null
 limit_test_batches: null
 limit_train_batches: null
@@ -48,7 +48,7 @@ limit_val_batches: null
 load_config: null
 log_every_n_steps: 50
 logger: true
-max_epochs: 40
+max_epochs: 80
 max_steps: -1
 max_time: null
 min_epochs: null
@@ -84,9 +84,10 @@ train: false
 train_and_test: false
 train_val_split: 0.2
 val_check_interval: null
-w_kld_weight: 1.0e-07
-w_samples: 8
+w_kld_weight: 1.0e-06
+w_samples: 16
 wandb_project: cbnn
 wc_mi_weight: 0.0
 weight_decay: 1.0e-04
+weight_pseudo_riemann_regularisation: 0.01
 z_samples: 16

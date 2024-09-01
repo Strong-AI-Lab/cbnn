@@ -4,7 +4,7 @@ __pycache__/
 *.tar.gz
 *-batches-py/
 checkpoints/
-lightning_logs/
+lightning_logs*/
 nohup.out
 .pytest_cache/
 wandb/

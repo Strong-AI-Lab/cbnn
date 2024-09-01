@@ -31,7 +31,7 @@ limit_val_batches: null
 load_config: null
 log_every_n_steps: 50
 logger: true
-max_epochs: 40
+max_epochs: 80
 max_steps: -1
 max_time: null
 min_epochs: null

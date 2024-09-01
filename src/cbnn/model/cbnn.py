@@ -40,6 +40,7 @@ class CBNN(pl.LightningModule):
             split_recons_infer_latents : Optional[float] = None,
             context_split_mi_weight : float = 1.0,
             inference_context_collator : str = "cat",
+            weight_pseudo_riemann_regularisation : float = 1.0,
             **kwargs
             ):
         super(CBNN, self).__init__()
@@ -74,6 +75,7 @@ class CBNN(pl.LightningModule):
         self.l2_regularisation = l2_regularisation
         self.context_inference_weight = context_inference_weight
         self.context_split_mi_weight = context_split_mi_weight
+        self.weight_pseudo_riemann_regularisation = weight_pseudo_riemann_regularisation
 
         # Context loader
         self.context_distrib_loader_funcs = {
@@ -135,6 +137,7 @@ class CBNN(pl.LightningModule):
         parser.add_argument('--reverse_freeze', action='store_true', help='Reverse the freeze list to freeze all parameters except those in the list.')
         parser.add_argument('--split_recons_infer_latents', type=Optional[float], default=None, help='Split the latent space into two parts for reconstruction and inference.')
         parser.add_argument('--context_split_mi_weight', type=float, default=1.0, help='Weight of the context split mutual information loss.')
+        parser.add_argument('--weight_pseudo_riemann_regularisation', type=float, default=1.0, help='Pseudo-Riemannian regularisation for the weight space.')
 
         return parent_parser
 
@@ -274,7 +277,7 @@ class CBNN(pl.LightningModule):
 
         y = torch.stack(ys).mean(dim=0)
 
-        outputs = [x_recons, y, ws, zs, context_zs, inference_mu, inference_log_var]
+        outputs = [x_recons, y, ys, ws, zs, context_zs, inference_mu, inference_log_var]
         outputs.extend([context_mus, context_log_vars])
 
         return outputs
@@ -312,6 +315,7 @@ class CBNN(pl.LightningModule):
             x_recons : List[torch.Tensor], 
             y_target : torch.Tensor, 
             y_recon : torch.Tensor,
+            y_samples : List[torch.Tensor],
             weight_samples : List[torch.Tensor],
             z_samples : List[torch.Tensor],
             context_z_samples : List[torch.Tensor],
@@ -328,6 +332,8 @@ class CBNN(pl.LightningModule):
         ic_mi_weight = kwargs['ic_mi_weight'] if 'ic_mi_weight' in kwargs else self.ic_mi_weight
         wc_mi_weight = kwargs['wc_mi_weight'] if 'wc_mi_weight' in kwargs else self.wc_mi_weight
         context_split_mi_weight = kwargs['context_split_mi_weight'] if 'context_split_mi_weight' in kwargs else self.context_split_mi_weight
+        l2_regularisation = kwargs['l2_regularisation'] if 'l2_regularisation' in kwargs else self.l2_regularisation
+        weight_pseudo_riemann_regularisation = kwargs['weight_pseudo_riemann_regularisation'] if 'weight_pseudo_riemann_regularisation' in kwargs else self.weight_pseudo_riemann_regularisation
         
         # Main inference loss
         infer_loss = torch.nn.functional.cross_entropy(y_recon, y_target)
@@ -343,7 +349,7 @@ class CBNN(pl.LightningModule):
         # Context Encoder Kullback-Leibler divergence loss and variance
         context_kld_loss = torch.tensor(0.0).to(x.device)
         context_kld_var = torch.tensor(0.0).to(x.device)
-        if self.context_kld_weight > 0.0:
+        if context_kld_weight > 0.0:
             for context_mu, context_log_var in zip(context_mus, context_log_vars):
                 context_kld_loss += normal_kullback_leibler_divergence(context_mu, context_log_var)
                 context_kld_var += torch.exp(context_log_var).mean()
@@ -351,7 +357,7 @@ class CBNN(pl.LightningModule):
             context_kld_var /= len(context_log_vars)
 
         # Inference Encoder Kullback-Leibler divergence loss and variance
-        if self.kld_weight > 0.0:
+        if kld_weight > 0.0:
             kld_loss = normal_kullback_leibler_divergence(mu, log_var)
             kld_var = torch.exp(log_var).mean()
         else:
@@ -359,7 +365,7 @@ class CBNN(pl.LightningModule):
             kld_var = torch.tensor(0.0).to(x.device)
 
         # Weights Kullback-Leibler divergence loss and variance
-        if self.w_kld_weight > 0.0:
+        if w_kld_weight > 0.0:
             weights_mean, weights_log_var = self.inference_classifier.get_weight_distributions()
             w_kld_loss = normal_kullback_leibler_divergence(weights_mean, weights_log_var)
             w_kld_var = torch.exp(weights_log_var).mean()
@@ -377,23 +383,31 @@ class CBNN(pl.LightningModule):
 
         # Inference-Context Mutual Information loss
         ic_mi_loss = torch.tensor(0.0).to(x.device)
-        if self.ic_mi_weight > 0.0:
+        if ic_mi_weight > 0.0:
             ic_mi_loss = gaussian_mutual_information(torch.cat(z_samples, dim=0), torch.cat(context_z_samples, dim=0),  top_k=16)
 
         # Weights-Context Mutual Information loss
         wc_mi_loss = torch.tensor(0.0).to(x.device)
-        if self.wc_mi_weight > 0.0:
+        if wc_mi_weight > 0.0:
             repeated_w = torch.cat([w.view(1,-1).repeat(context_z_samples[0].size(0) // self.w_samples, 1) for w in weight_samples], dim=0)
             context_z = torch.cat(context_z_samples, dim=0)
             wc_mi_loss = gaussian_mutual_information(repeated_w, context_z, max_dim=128, top_k=16)
 
         # L2 weight regularisation
         l2_loss = torch.tensor(0.0).to(x.device)
-        if self.l2_regularisation > 0.0:
+        if l2_regularisation > 0.0:
             l2_loss = torch.cat([w.view(-1) for w in weight_samples]).pow(2).sum() / (2 * len(weight_samples))
 
+        # Pseudo-Riemann regularisation
+        pseudo_riemann_loss = torch.tensor(0.0).to(x.device)
+        if weight_pseudo_riemann_regularisation > 0.0 and len(y_samples) > 1:
+            for i, y_i in enumerate(y_samples):
+                for y_j in y_samples[i+1:]:
+                    pseudo_riemann_loss += torch.nn.functional.mse_loss(y_i, y_j)
+            pseudo_riemann_loss /= len(y_samples) * (len(y_samples) - 1) / 2
 
-        loss = infer_loss + recons_weight * recons_loss + context_kld_weight * context_kld_loss + kld_weight * kld_loss + w_kld_weight * w_kld_loss + context_split_mi_weight * context_split_mi_loss + ic_mi_weight * ic_mi_loss + wc_mi_weight * wc_mi_loss + self.l2_regularisation * l2_loss
+
+        loss = infer_loss + recons_weight * recons_loss + context_kld_weight * context_kld_loss + kld_weight * kld_loss + w_kld_weight * w_kld_loss + context_split_mi_weight * context_split_mi_loss + ic_mi_weight * ic_mi_loss + wc_mi_weight * wc_mi_loss + self.l2_regularisation * l2_loss + weight_pseudo_riemann_regularisation * pseudo_riemann_loss
         return {'loss': loss, 
                 'Inference_Loss':infer_loss.detach(), 
                 'Reconstruction_Loss':recons_loss.detach(), 
@@ -407,7 +421,8 @@ class CBNN(pl.LightningModule):
                 'Accuracy':self.accuracy(y_recon, y_target).detach(),
                 'Context_KLD_Var':context_kld_var.detach(),
                 'Weights_KLD_Var':w_kld_var.detach(),
-                'KLD_Var':kld_var.detach()
+                'KLD_Var':kld_var.detach(),
+                'Pseudo_Riemann':pseudo_riemann_loss.detach()
                 }
     
     def _mix_labels(self, y_target : torch.Tensor, labels_to_mix : List[torch.Tensor], num_classes : int):
@@ -770,7 +785,8 @@ class ResEnc_CBNN(CBNN):
         # Build modules
         self.context_encoder = ResEnc_CBNN.ResNetEncoder(resnet, latent_dim)
         self.context_decoder = CNNVariationalDecoder(self.recons_latent_dim, in_channels, image_dim, decoder_hidden_dims)
-        self.inference_encoder = ResEnc_CBNN.ResNetEncoder(resnet, latent_dim)
+        # self.inference_encoder = ResEnc_CBNN.ResNetEncoder(resnet, latent_dim)
+        self.inference_encoder = self.context_encoder
         self.inference_classifier = BayesianClassifier(latent_dim*self.nb_input_images, num_classes, latent_dim, inference_num_layers)
     
     @classmethod

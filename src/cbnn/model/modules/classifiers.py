@@ -56,15 +56,15 @@ class BayesianClassifier(torch.nn.Module):
 
         self.fc_in_mean = torch.nn.Embedding(in_dim, hidden_dim)
         self.fc_in_log_var = torch.nn.Embedding(in_dim, hidden_dim)
-        self.fc_in_mean.weight.data.normal_(0, 0.001 * 1/math.sqrt(in_dim))
-        self.fc_in_log_var.weight.data.normal_(0, 0.001 * 1/math.sqrt(in_dim))
+        self.fc_in_mean.weight.data.normal_(0, 1)
+        self.fc_in_log_var.weight.data.normal_(0, 1)
 
         self.fc_in_bn = torch.nn.BatchNorm1d(hidden_dim)
 
         self.fc_out_mean = torch.nn.Embedding(hidden_dim, out_dim)
         self.fc_out_log_var = torch.nn.Embedding(hidden_dim, out_dim)
-        self.fc_out_mean.weight.data.normal_(0, 0.001 * 1/math.sqrt(hidden_dim))
-        self.fc_out_log_var.weight.data.normal_(0, 0.001 * 1/math.sqrt(hidden_dim))
+        self.fc_out_mean.weight.data.normal_(0, 1)
+        self.fc_out_log_var.weight.data.normal_(0, 1)
 
         self.fc_hidden = torch.nn.ModuleList()
         self.fc_activations = torch.nn.ModuleList()
