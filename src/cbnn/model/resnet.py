@@ -130,7 +130,7 @@ class MCQAResNet18(ResNet18):
         choices = x[:, self.nb_context:,:] # [batch_size, nb_choices, embedding_dim]
         
         if self.nb_context > 1:
-            context = torch.nn.functional.leaky_relu(self.context_merger(context.view(batch_size, -1)))
+            context = torch.nn.functional.leaky_relu(self.context_merger(context.view(batch_size, -1))).unsqueeze(1)
 
         # Normalise embeddings
         context = context + torch.randn_like(context) * 1e-6 # Add eps*1e-6 to avoid division by zero
@@ -139,7 +139,7 @@ class MCQAResNet18(ResNet18):
         choices = choices / choices.norm(dim=-1, keepdim=True)
 
         # Compute scores
-        scores = (context.unsqueeze(1) @ choices.permute(0,2,1)).view(batch_size, self.nb_choices) # [batch_size, 1, embedding_dim] x [batch_size, embedding_dim, nb_choices] -> [batch_size, nb_choices]
+        scores = (context @ choices.permute(0,2,1)).view(batch_size, self.nb_choices) # [batch_size, 1, embedding_dim] x [batch_size, embedding_dim, nb_choices] -> [batch_size, nb_choices]
         return scores
 
     

@@ -843,3 +843,28 @@ class ResEnc_CBNN(CBNN):
         
         return parent_parser
 
+
+class MCQA_ResEnc_CBNN(ResEnc_CBNN):
+    def __init__(self, **kwargs):
+        super(MCQA_ResEnc_CBNN, self).__init__(**kwargs)
+
+    def _init_modules(self,
+            in_channels: int = 3,
+            image_dim: int = 64,
+            num_classes: int = 10,
+            latent_dim: int = 256,
+            inference_num_layers: int = 1,
+            decoder_hidden_dims: List = None,
+            batch_norm_track_running_stats: bool = True,
+            **kwargs):
+
+        resnet = ResNet18(in_channels=in_channels, num_classes=num_classes, batch_norm_track_running_stats=batch_norm_track_running_stats, **kwargs).resnet
+        self.latent_dim = latent_dim
+        self.inference_num_layers = inference_num_layers
+        
+        # Build modules
+        self.context_encoder = ResEnc_CBNN.ResNetEncoder(resnet, latent_dim)
+        self.context_decoder = CNNVariationalDecoder(self.recons_latent_dim, in_channels, image_dim, decoder_hidden_dims)
+        self.inference_encoder = self.context_encoder
+        self.inference_classifier = MCQABayesClassifier(latent_dim*self.nb_input_images, latent_dim, inference_num_layers, nb_context=self.nb_input_images-num_classes, nb_choices=num_classes, batch_norm_track_running_stats=batch_norm_track_running_stats)
+    

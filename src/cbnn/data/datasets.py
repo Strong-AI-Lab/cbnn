@@ -6,7 +6,7 @@ import numpy as np
 import requests
 import tqdm
 
-from .utils import SquarePad
+from .utils import SquarePad, ImageConcat
 
 import deeplake
 import torch
@@ -343,7 +343,7 @@ class OfficeHomeDataModule(BaseDataModule):
 
 class ACREDataModule(BaseDataModule):
 
-    def __init__(self, data_dir: str = DEFAULT_SAVE_DIR, split: Optional[str] = None, **kwargs):
+    def __init__(self, data_dir: str = DEFAULT_SAVE_DIR, split: Optional[str] = None, concat_images : bool = False, concat_rows : int = -1, concat_cols : int = -1, **kwargs):
         if split is not None:
             data_dir = os.path.join(data_dir, split)
 
@@ -355,23 +355,37 @@ class ACREDataModule(BaseDataModule):
             # transforms_v2.Normalize((131.6699, 126.6359, 125.6257, 255.0000), (36.4253, 29.8901, 30.2831,  0.0001)),
             transforms_v2.Normalize((131.6699, 126.6359, 125.6257), (36.4253, 29.8901, 30.2831)), # Mean and std of the dataset based on the IID training set
             transforms_v2.Pad([0,40,0,40]), # [320x240] --> [320x320]
-            transforms_v2.Resize((256, 256)) # [320x320] --> [256x256]
+            transforms_v2.Resize((128, 128)) # [320x320] --> [256x256]
         ])
         self.transform_only = transforms.Compose(self.load_image_tensor.transforms[1:])
+        
+        self.concat_images = concat_images
+        self.concat_rows = concat_rows
+        self.concat_cols = concat_cols
+        if self.concat_images:
+            self.image_concatenator = ImageConcat(self.concat_rows, self.concat_cols)
 
     def _build_image_tensor_sequence(self, image_files):
         image_sequence = []
         for image_file in image_files:
             image = self.load_image_tensor(image_file)
             image_sequence.append(image)
-        return torch.stack(image_sequence)
+
+        if self.concat_images:
+            return self.image_concatenator(image_sequence)
+        else:
+            return torch.stack(image_sequence)
 
     def _transform_sequence_only(self, images):
         image_sequence = []
         for image in images:
             image = self.transform_only(image)
             image_sequence.append(image)
-        return torch.stack(image_sequence)
+        
+        if self.concat_images:
+            return self.image_concatenator(image_sequence)
+        else:
+            return torch.stack(image_sequence)
 
 
     def prepare_data(self):
@@ -386,6 +400,7 @@ class ACREDataModule(BaseDataModule):
         config_file = os.path.join(self.data_dir, 'config/', f'{split}.json')
         images_dir = os.path.join(self.data_dir, 'images/')
         images_files = os.listdir(images_dir)
+        images_files = sorted(list(filter(lambda x: x.startswith(f'ACRE_{split}'), images_files)))
 
         with open(config_file, 'r') as f:
             samples = json.load(f)
@@ -497,7 +512,7 @@ class RAVENDataModule(BaseDataModule):
     }
 
 
-    def __init__(self, **kwargs):
+    def __init__(self, concat_images : bool = False, concat_rows : int = -1, concat_cols : int = -1, concat_context : Optional[int] = None, **kwargs):
         super(RAVENDataModule, self).__init__(**kwargs)
         self.image_transform_fn = transforms_v2.Compose([
             transforms.ToTensor(), # [0, 255] -> [0, 1]
@@ -513,10 +528,32 @@ class RAVENDataModule(BaseDataModule):
             self.transform = self._load_image_tensor_single
             self.target_transform = lambda x : 0
 
+        self.concat_images = concat_images
+        self.concat_rows = concat_rows
+        self.concat_cols = concat_cols
+        self.concat_context = concat_context
+        if self.concat_images:
+            self.image_concatenator = ImageConcat(self.concat_rows, self.concat_cols)
+        if self.concat_context is not None:
+            self.target_resizer = transforms_v2.Compose([
+                transforms_v2.Resize((128*self.concat_rows, 128*self.concat_cols))
+            ])
+
     def _load_image_tensor_sequence(self, image_file):
         data = np.load(image_file)
         images = [self.image_transform_fn(i) for i in data['image']]
-        return torch.stack(images)
+
+        if self.concat_images:
+            if self.concat_context is not None:
+                images_to_concat = images[:self.concat_context]
+                context = self.image_concatenator(images_to_concat)
+                targets = list(map(self.target_resizer, images[self.concat_context:]))
+                images = torch.stack([context] + targets)
+            else:
+                images = self.image_concatenator(images)
+            return images
+        else:
+            return torch.stack(images)
     
     def _load_target(self, target_file):
         data = np.load(target_file)

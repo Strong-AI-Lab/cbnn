@@ -1,6 +1,5 @@
 
 from typing import Optional
-import math
 
 import torch
 
@@ -114,27 +113,30 @@ class MCQABayesClassifier(BayesianClassifier):
     Bayesian classifier for Multiple Choice Question Answering
     """
 
-    def __init__(self, in_dim: int, hidden_dim: int, num_layers: int = 3, nb_context: int = 4, nb_choices: int = 4):
+    def __init__(self, in_dim: int, hidden_dim: int, num_layers: int = 3, nb_context: int = 4, nb_choices: int = 4, **kwargs):
         self.single_input_size = in_dim // (nb_context + nb_choices)
 
-        super(MCQABayesClassifier, self).__init__(self.single_input_size, hidden_dim, hidden_dim, num_layers)
+        super(MCQABayesClassifier, self).__init__(self.single_input_size, hidden_dim, hidden_dim, num_layers, **kwargs)
         self.nb_context = nb_context
         self.nb_choices = nb_choices
 
-        self.context_merger = torch.nn.Linear(hidden_dim * nb_context, hidden_dim)
+        if self.nb_context > 1:
+            self.context_merger = torch.nn.Linear(hidden_dim * nb_context, hidden_dim)
 
     def forward(self, x: torch.Tensor, eps_in: Optional[torch.Tensor] = None, eps_out: Optional[torch.Tensor] = None):
-        batch_size  = x.size(0)
+        batch_size = x.size(0)
 
         # Compute embeddings of context and choices
-        x = x.view(-1, self.single_input_size) # [batch_size, (nb_context + nb_choices) * single_input_size] -> [batch_size *(nb_context + nb_choices), single_input_size]
+        x = x.view(-1, self.single_input_size) # [batch_size, (nb_context + nb_choices) * single_input_size] -> [batch_size * (nb_context + nb_choices), single_input_size]
         x, fc_in_weights, fc_out_weights = super().forward(x, eps_in, eps_out)
         x = x.view(batch_size, self.nb_context + self.nb_choices, self.hidden_dim) # [batch_size, (nb_context + nb_choices) * hidden_dim] -> [batch_size, nb_context + nb_choices, hidden_dim]
 
         context = x[:, :self.nb_context,:] # [batch_size, nb_context, hidden_dim]
         choices = x[:, self.nb_context:,:] # [batch_size, nb_choices, hidden_dim]
 
-        context = torch.nn.functional.silu(self.context_merger(context.view(batch_size, -1))) #  [batch_size, nb_context, hidden_dim] ->  [batch_size, hidden_dim]
+        if self.nb_context > 1:
+            context = torch.nn.functional.silu(self.context_merger(context.view(batch_size, -1))).unsqueeze(1) # [batch_size, nb_context, hidden_dim] ->  [batch_size, 1, hidden_dim]
+            # context = context.mean(dim=1, keepdim=True)
 
         # Normalise embeddings
         context = context + torch.randn_like(context) * 1e-6 # Add eps*1e-6 to avoid division by zero
@@ -143,6 +145,6 @@ class MCQABayesClassifier(BayesianClassifier):
         choices = choices / choices.norm(dim=-1, keepdim=True)
 
         # Compute scores
-        scores = (context.unsqueeze(1) @ choices.permute(0,2,1)).view(batch_size, self.nb_choices) # [batch_size, 1, hidden_dim] x [batch_size, hidden_dim, nb_choices] -> [batch_size, nb_choices]
+        scores = (context @ choices.permute(0,2,1)).view(batch_size, self.nb_choices) # [batch_size, 1, hidden_dim] x [batch_size, hidden_dim, nb_choices] -> [batch_size, nb_choices]
 
         return [scores, fc_in_weights, fc_out_weights]
