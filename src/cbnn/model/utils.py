@@ -99,7 +99,7 @@ def average_collage_optim(input_collator : Callable): # to use carefully, can le
 
     return collate_fn
 
-def average_collage(input_collator : Callable):
+def average_collage(input_collator : Callable): # performs multiple weight samplings
     def collate_fn(zs : List[torch.Tensor], z_cs : List[torch.Tensor], classifier : Callable):
         outputs = []
         ws = []
@@ -120,6 +120,14 @@ def cat_collator(z : torch.Tensor, z_c : torch.Tensor, classifier : Callable):
 
 @average_collage
 def sum_collator(z : torch.Tensor, z_c : torch.Tensor, classifier : Callable):
+    return [z + z_c]
+
+@average_collage_optim
+def cat_collator_optim(z : torch.Tensor, z_c : torch.Tensor, classifier : Callable):
+    return [torch.cat([z, z_c], dim=-1)]
+
+@average_collage_optim
+def sum_collator_optim(z : torch.Tensor, z_c : torch.Tensor, classifier : Callable):
     return [z + z_c]
 
 @average_collage
@@ -181,7 +189,9 @@ def cross_mul_collator(z : torch.Tensor, z_c : torch.Tensor, classifier : Callab
 
 INFERENCE_CONTEXT_COLLATORS = {
     "cat" : cat_collator,
+    "cat_optim" : cat_collator_optim,
     "sum" : sum_collator,
+    "sum_optim" : sum_collator_optim,
     "mul" : mul_collator,
     "sub" : sub_collator,
     "none" : none_collator,
