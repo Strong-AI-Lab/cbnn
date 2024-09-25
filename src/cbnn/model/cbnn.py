@@ -746,7 +746,7 @@ class ResEnc_CBNN(CBNN):
             old_conv2 = last_block[-2]
             old_bn2 = last_block[-1]
             last_block[-2] = torch.nn.Conv2d(old_conv2.in_channels, 2*latent_dim, kernel_size=old_conv2.kernel_size, stride=old_conv2.stride, padding=old_conv2.padding, bias=old_conv2.bias is not None)
-            last_block[-1] = torch.nn.BatchNorm2d(2*latent_dim, eps=old_bn2.eps, momentum=old_bn2.momentum, affine=old_bn2.affine, track_running_stats=old_bn2.track_running_stats)
+            last_block[-1] = type(old_bn2)(2*latent_dim, eps=old_bn2.eps, momentum=old_bn2.momentum, affine=old_bn2.affine, track_running_stats=old_bn2.track_running_stats)
             self.resnet_encoder[-2][-1] = last_block
 
         def forward(self, x : torch.Tensor):
@@ -776,18 +776,18 @@ class ResEnc_CBNN(CBNN):
             latent_dim: int = 256,
             inference_num_layers: int = 1,
             decoder_hidden_dims: List = None,
+            batch_norm_track_running_stats: bool = True,
             **kwargs):
 
-        resnet = ResNet18(in_channels=in_channels, num_classes=num_classes, **kwargs).resnet
+        resnet = ResNet18(in_channels=in_channels, num_classes=num_classes, batch_norm_track_running_stats=batch_norm_track_running_stats, **kwargs).resnet
         self.latent_dim = latent_dim
         self.inference_num_layers = inference_num_layers
         
         # Build modules
         self.context_encoder = ResEnc_CBNN.ResNetEncoder(resnet, latent_dim)
         self.context_decoder = CNNVariationalDecoder(self.recons_latent_dim, in_channels, image_dim, decoder_hidden_dims)
-        # self.inference_encoder = ResEnc_CBNN.ResNetEncoder(resnet, latent_dim)
         self.inference_encoder = self.context_encoder
-        self.inference_classifier = BayesianClassifier(latent_dim*self.nb_input_images, num_classes, latent_dim, inference_num_layers)
+        self.inference_classifier = BayesianClassifier(latent_dim*self.nb_input_images, num_classes, latent_dim, inference_num_layers, batch_norm_track_running_stats=batch_norm_track_running_stats)
     
     @classmethod
     def add_model_specific_args(cls, parent_parser):
@@ -800,6 +800,7 @@ class ResEnc_CBNN(CBNN):
         parser.add_argument('--latent_dim', type=int, default=256, help='Dimension of the latent space.')
         parser.add_argument('--inference_num_layers', type=int, default=1, help='Number of layers for the inference classifier.')
         parser.add_argument('--decoder_hidden_dims', type=int, nargs='+', default=[32, 64, 128, 256, 512], help='Hidden dimensions for the decoder.')
+        parser.add_argument('--batch_norm_track_running_stats', type=bool, default=True, help='Track running statistics of batch normalisation layers.')
         
         return parent_parser
 

@@ -3,6 +3,8 @@ from typing import Optional
 import math
 
 import torch
+
+from .norm import BatchNorm1dNoTrack
     
 
 class MLPClassifier(torch.nn.Module):
@@ -46,20 +48,23 @@ class BayesianClassifier(torch.nn.Module):
     [2] Do Bayesian Neural Networks Need To Be Fully Stochastic?, Sharma et al. 2023
     """
 
-    def __init__(self, in_dim: int, out_dim: int, hidden_dim: int, num_layers: int = 3):
+    def __init__(self, in_dim: int, out_dim: int, hidden_dim: int, num_layers: int = 3, batch_norm_track_running_stats : bool = True):
         super(BayesianClassifier, self).__init__()
 
         self.in_dim = in_dim
         self.out_dim = out_dim
         self.hidden_dim = hidden_dim
         self.num_layers = num_layers
+        self.batch_norm_track_running_stats = batch_norm_track_running_stats
+
+        norm_layer = torch.nn.BatchNorm1d if batch_norm_track_running_stats else BatchNorm1dNoTrack
 
         self.fc_in_mean = torch.nn.Embedding(in_dim, hidden_dim)
         self.fc_in_log_var = torch.nn.Embedding(in_dim, hidden_dim)
         self.fc_in_mean.weight.data.normal_(0, 1)
         self.fc_in_log_var.weight.data.normal_(0, 1)
 
-        self.fc_in_bn = torch.nn.BatchNorm1d(hidden_dim)
+        self.fc_in_bn = norm_layer(hidden_dim)
 
         self.fc_out_mean = torch.nn.Embedding(hidden_dim, out_dim)
         self.fc_out_log_var = torch.nn.Embedding(hidden_dim, out_dim)
@@ -72,7 +77,7 @@ class BayesianClassifier(torch.nn.Module):
         for _ in range(num_layers):
             self.fc_hidden.append(torch.nn.Linear(hidden_dim, hidden_dim))
             self.fc_activations.append(torch.nn.SiLU())
-            self.fc_norms.append(torch.nn.BatchNorm1d(hidden_dim))
+            self.fc_norms.append(norm_layer(hidden_dim))
 
     
     def _sample_weights(self, mean: torch.Tensor, log_var: torch.Tensor, eps: Optional[torch.Tensor] = None):

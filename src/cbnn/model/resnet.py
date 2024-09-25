@@ -5,17 +5,24 @@ import pytorch_lightning as pl
 import torchvision.models as models
 import torch
 
+from .modules.norm import BatchNorm2dNoTrack
+
 
 class ResNet18(pl.LightningModule):
-    def __init__(self, in_channels: int = 3, num_classes: int = 10, pretrained: bool = True, learning_rate : float = 0.005, weight_decay : float = 0.0, freeze_parameters : Optional[List[str]] = None, reverse_freeze : bool = False, **kwargs):
+    def __init__(self, in_channels: int = 3, num_classes: int = 10, pretrained: bool = True, learning_rate : float = 0.005, weight_decay : float = 0.0, freeze_parameters : Optional[List[str]] = None, reverse_freeze : bool = False, batch_norm_track_running_stats : bool = True, **kwargs):
         super(ResNet18, self).__init__()
         self.in_channels = in_channels
         self.num_classes = num_classes
         self.pretrained = pretrained
         self.learning_rate = learning_rate
         self.weight_decay = weight_decay
+        self.batch_norm_track_running_stats = batch_norm_track_running_stats
 
-        self.resnet = models.resnet18(pretrained=pretrained)
+        norm_layer = None
+        if batch_norm_track_running_stats == False:
+            norm_layer = BatchNorm2dNoTrack
+
+        self.resnet = models.resnet18(pretrained=pretrained, norm_layer=norm_layer)
         if num_classes != 1000:
             self.resnet.fc = torch.nn.Linear(self.resnet.fc.in_features, num_classes) # Change the output layer to match the number of classes
         if in_channels > 3 or in_channels == 2:
@@ -51,6 +58,7 @@ class ResNet18(pl.LightningModule):
         parser.add_argument('--weight_decay', type=float, default=0.0, help='Weight decay for the optimizer.')
         parser.add_argument('--freeze_parameters', type=str, nargs='+', default=None, help='List of layers to freeze.')
         parser.add_argument('--reverse_freeze', type=bool, default=False, help='Reverse the freezing of the layers.')
+        parser.add_argument('--batch_norm_track_running_stats', type=bool, default=True, help='Track running statistics of batch normalisation layers.')
         return parent_parser
     
     def training_step(self, batch, batch_idx):
