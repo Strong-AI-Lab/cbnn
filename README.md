@@ -1,6 +1,6 @@
-# Causal Bayesian Neural Network
+# Causal Invariant Bayesian Neural Network
 
-Repository of the Causal Bayesian Neural Network (CBNN).
+Repository of the Causal Invariant Bayesian Neural Network (CIBNN).
 
 
 # Installation
@@ -26,6 +26,7 @@ The data used in the experiments are not included in the repository due to their
 |-----------------|-------|----------------------|---------------------------------------------------------------------------------------------------------------|----------------------------------------|
 | MNIST           |       |  auto                | [torchvision documentation](https://pytorch.org/vision/main/generated/torchvision.datasets.MNIST.html)        |                                        |
 | CIFAR10         |       |  auto                | [torchvision documentation](https://pytorch.org/vision/master/generated/torchvision.datasets.CIFAR10.html)    |                                        |
+| OFFICEHOME      |       |  auto                | [project homepage](https://www.hemanthdv.org/officeHomeDataset.html)                                             |                                        |
 | ACRE            | IID   |  yes                 | [project homepage](https://wellyzhang.github.io/project/acre.html)                                            | 1P0WBnnjWolGsrATUQtx4ictiYlOGc-OT      |
 |                 | Comp  |  yes                 |                                                                                                               | 1-LZMt08a1v-KSuaQTS1lqD6BCEw47LEY      |
 |                 | Comp  |  yes                 |                                                                                                               | 1Sn_tKbe6mMv7Tc_y6hJZnm7lSenjwIys      |
@@ -84,6 +85,20 @@ Common arguments:
 - `--train`, `--test`, `--train_and_test`: Train, test, or train and test the model. Default option is `train_and_test`.
 - `--max_epochs`: Maximum number of epochs. You might want to set it as the default value of Pytorch Lightning is 1000.
 
+To run the experiments from the paper, use the provided config files in the `config` folder.
+
+## Out-of-distribution runs
+
+When running an o.o.d config, replace the `save` parameter in the config file with your own save path. Here are some additional dataset-specific parameters that you can tweak:
+
+| Dataset         | Parameter          | Description                                                                                                  |
+|-----------------|--------------------|--------------------------------------------------------------------------------------------------------------|
+| CIFAR10         | `--perturbation`   | Level of image perturbation. Float between 0.0 and 1.0.                                                      |
+| OFFICEHOME      | `--split`          | The split to use. IID Options: `RealWorld`, `Product`, `Art`, `Clipart`. In OOD settings, write the test split next to the train split, e.g. to test a model on `Product` after training on `RealWorld`, write `realWorld_Product`.       |
+| ACRE            | `--split`          | The split to use. Options: `IID`, `Comp`, `Sys`.                                                             |
+| RAVEN           | `--split`          | The split to use. Options: `IID`, `ĪID_SMALL`, `IID_TRANSFER`, `OOD`, `OOD_SMALL`, `OOD_TRANSFER`.           |
+
+
 
 ## Hyperparameter search
 
@@ -96,4 +111,4 @@ You can use the same arguments as in the `run.py` script. Please, be aware that 
 
 
 ## Architecture
-![Image Description](assets/cbnn_architecture.png)
+![Image Description](assets/cibnn_architecture.png)
