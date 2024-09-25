@@ -32,7 +32,7 @@ gradient_clip_val: null
 ic_mi_weight: 0.0
 image_dim: 256
 in_channels: 3
-inference_context_collator: sum
+inference_context_collator: sum_optim
 inference_mode: true
 inference_num_layers: 1
 inverse_context: false

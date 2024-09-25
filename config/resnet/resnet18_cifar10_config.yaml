@@ -47,7 +47,7 @@ num_workers: 4
 overfit_batches: 0.0
 plugins: null
 precision: 32
-pretrained: False
+pretrained: true
 profiler: null
 reload_dataloaders_every_n_epochs: 0
 replace_sampler_ddp: true

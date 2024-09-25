@@ -5,6 +5,7 @@ amp_level: null
 auto_lr_find: false
 auto_scale_batch_size: false
 auto_select_gpus: null
+batch_norm_track_running_stats: false
 batch_size: 64
 benchmark: null
 check_val_every_n_epoch: 1
@@ -32,7 +33,7 @@ gradient_clip_val: null
 ic_mi_weight: 0.0
 image_dim: 256
 in_channels: 3
-inference_context_collator: sum
+inference_context_collator: sum_optim
 inference_mode: true
 inference_num_layers: 1
 inverse_context: false
