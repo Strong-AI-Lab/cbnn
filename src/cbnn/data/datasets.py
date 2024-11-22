@@ -1,7 +1,7 @@
 
 import os
 import json
-from typing import Optional, Callable, Any
+from typing import Optional, Callable, Any, List
 import numpy as np
 import requests
 import tqdm
@@ -228,28 +228,42 @@ class CIFAR10OODDataModule(CIFAR10DataModule):
 
 class OfficeHomeDataModule(BaseDataModule):
     CATEGORIES = {
-        'RealWorld' : (0,4357),     # 4357 samples
-        'Product' : (4357,8796),    # 4440 samples
-        'Art' : (8796,11223),       # 2427 samples
-        'Clipart' : (11223,15588)   # 4365 samples
+        'RealWorld' : [(0,4357)],     # 4357 samples
+        'Product' : [(4357,8796)],    # 4440 samples
+        'Art' : [(8796,11223)],       # 2427 samples
+        'Clipart' : [(11223,15588)],   # 4365 samples
+        'NotRealWorld' : [(4357,15588)], # 11231 samples
+        'NotProduct' : [(0,4357), (8796,15588)], # 11149 samples
+        'NotArt' : [(0,8796), (11223,15588)], # 13161 samples
+        'NotClipart' : [(0,11223)] # 11223 samples
     }
     CATEGORIES_NORM = {
         'RealWorld' : ((0.4609, 0.4380, 0.4132), (0.3798, 0.3737, 0.3746)),
         'Product' : ((0.6289, 0.6189, 0.6117), (0.4103, 0.4093, 0.4117)),
         'Art' : ((0.3868, 0.3618, 0.3336), (0.3571, 0.3458, 0.3380)),
-        'Clipart' : ((0.4371, 0.4221, 0.4032), (0.4396, 0.4315, 0.4320))
+        'Clipart' : ((0.4371, 0.4221, 0.4032), (0.4396, 0.4315, 0.4320)),
+        'NotRealWorld' : ((0.5020, 0.4869, 0.4706),(0.4244, 0.4199, 0.4218)),
+        'NotProduct' : ((0.4354, 0.4152, 0.3919), (0.4007, 0.3928, 0.3921)),
+        'NotArt' : ((0.5097, 0.4937, 0.4768), (0.4195, 0.4153, 0.4181)),
+        'NotClipart' : ((0.5114, 0.4931, 0.4745), (0.4000, 0.3969, 0.3993))
     }
     URL = 'hub://activeloop/'
     NAME = 'office-home-domain-adaptation'
 
-    def _process_data(self, data : deeplake.Dataset, transform : Callable):
+    def _process_data(self, indices : List[int], transform : Callable):
+        data = self.dl_data[indices]
+
         images = data.images.data(aslist=True)['value']
         labels = data.domain_objects.data(aslist=True)['value']
-
+        
         images = [transform(image) for image in images]
         labels = [int(label[0]) for label in labels]
 
         return list(zip(images, labels))
+    
+    def _get_split_idxs(self, data : deeplake.Dataset, split : str):
+        ranges = type(self).CATEGORIES[split]
+        return np.concatenate([range(r[0], r[1]) for r in ranges]).tolist()
 
     def __init__(self, **kwargs):
         super(OfficeHomeDataModule, self).__init__(**kwargs)
@@ -267,16 +281,16 @@ class OfficeHomeDataModule(BaseDataModule):
         if self.train_category is None:
             self.transform = transforms.Compose([
                 base_transform,
-                transforms_v2.Normalize(*OfficeHomeDataModule.CATEGORIES_NORM[self.distribution_split])
+                transforms_v2.Normalize(*type(self).CATEGORIES_NORM[self.distribution_split])
             ])
         else:
             self.transform = transforms.Compose([
                 base_transform,
-                transforms_v2.Normalize(*OfficeHomeDataModule.CATEGORIES_NORM[self.train_category])
+                transforms_v2.Normalize(*type(self).CATEGORIES_NORM[self.train_category])
             ])
             self.test_transform = transforms.Compose([
                 base_transform,
-                transforms_v2.Normalize(*OfficeHomeDataModule.CATEGORIES_NORM[self.test_category])
+                transforms_v2.Normalize(*type(self).CATEGORIES_NORM[self.test_category])
             ])
 
         self.train_idxs = None
@@ -287,25 +301,22 @@ class OfficeHomeDataModule(BaseDataModule):
         self.test_data = None
 
     def prepare_data(self):
-        if not os.path.exists(os.path.join(self.data_dir, OfficeHomeDataModule.NAME)):
+        if not os.path.exists(os.path.join(self.data_dir, type(self).NAME)):
             # Download data
-            deeplake.deepcopy(os.path.join(OfficeHomeDataModule.URL, OfficeHomeDataModule.NAME), os.path.join(self.data_dir, OfficeHomeDataModule.NAME))
+            deeplake.deepcopy(os.path.join(type(self).URL, type(self).NAME), os.path.join(self.data_dir, type(self).NAME))
         
-        self.dl_data = deeplake.load(os.path.join(self.data_dir, OfficeHomeDataModule.NAME))
+        self.dl_data = deeplake.load(os.path.join(self.data_dir, type(self).NAME))
 
     def setup(self, stage=None):
         if self.train_idxs is None:
             np.random.seed(42) # Set seed for reproducibility
 
             if self.train_category is not None:
-                train_idx_range = OfficeHomeDataModule.CATEGORIES[self.train_category]
-                test_idx_range = OfficeHomeDataModule.CATEGORIES[self.test_category]
-
-                train_idxs = range(train_idx_range[0], train_idx_range[1])
+                train_idxs = self._get_split_idxs(self.dl_data, self.train_category)
                 val_idxs = np.random.choice(train_idxs, int(len(train_idxs) * self.train_val_split), replace=False).tolist()
                 train_idxs = np.setdiff1d(train_idxs, val_idxs).tolist()
 
-                test_idxs = range(test_idx_range[0], test_idx_range[1])
+                test_idxs = self._get_split_idxs(self.dl_data, self.test_category)
                 test_idxs = np.random.choice(test_idxs, int(len(test_idxs) * self.train_val_split), replace=False).tolist()
 
                 self.train_idxs = train_idxs
@@ -313,9 +324,7 @@ class OfficeHomeDataModule(BaseDataModule):
                 self.test_idxs = test_idxs
 
             else:
-                idx_range = OfficeHomeDataModule.CATEGORIES[self.distribution_split]
-                
-                train_idxs = range(idx_range[0], idx_range[1])
+                train_idxs = self._get_split_idxs(self.dl_data, self.distribution_split)
                 val_idxs = np.random.choice(train_idxs, int(len(train_idxs) * self.train_val_split), replace=False).tolist()
                 train_idxs = np.setdiff1d(train_idxs, val_idxs).tolist()
 
@@ -327,8 +336,8 @@ class OfficeHomeDataModule(BaseDataModule):
                 self.test_idxs = test_idxs
 
         if stage == "fit":
-            self.train_data = self._process_data(self.dl_data[self.train_idxs], self.transform)
-            self.val_data = self._process_data(self.dl_data[self.val_idxs], self.transform)
+            self.train_data = self._process_data(self.train_idxs, self.transform)
+            self.val_data = self._process_data(self.val_idxs, self.transform)
 
         elif stage == "test":
             if self.test_category is not None:
@@ -336,7 +345,89 @@ class OfficeHomeDataModule(BaseDataModule):
             else:
                 transform = self.transform
             
-            self.test_data = self._process_data(self.dl_data[self.test_idxs], transform)
+            self.test_data = self._process_data(self.test_idxs, transform)
+
+
+
+
+class PacsDataModule(BaseDataModule):
+    URL = 'hub://activeloop/'
+    TRAIN_NAME = 'pacs-train'
+    VAL_NAME = 'pacs-val'
+    TEST_NAME = 'pacs-test'
+
+    CATEGORIES = {
+        'Cartoon' : ['cartoon'],
+        'Art' : ['art_painting'],
+        'Photo' : ['photo'],
+        'Sketch' : ['sketch'],
+        'NotCartoon' : ['art_painting', 'photo', 'sketch'],
+        'NotArt' : ['cartoon', 'photo', 'sketch'],
+        'NotPhoto' : ['cartoon', 'art_painting', 'sketch'],
+        'NotSketch' : ['cartoon', 'art_painting', 'photo']
+    }
+
+    def _process_data(self, dl, category, transform):
+        keywords = type(self).CATEGORIES[category]
+        indices = [i for i, v in enumerate(dl.domains.data(aslist=True)['text']) if v[0] in keywords]
+        data = dl[indices]
+
+        images = data.images.data(aslist=True)['value']
+        labels = data.labels.data(aslist=True)['value']
+
+        images = [transform(image) for image in images]
+        labels = [int(label[0]) for label in labels]
+
+        return list(zip(images, labels))
+
+    def __init__(self, **kwargs):
+        super(PacsDataModule, self).__init__(**kwargs)
+
+        self.train_category, self.test_category = None, None
+        if len(self.distribution_split.split('_')) == 2:
+            self.train_category, self.test_category = self.distribution_split.split('_')
+
+        self.dl_train = None
+        self.dl_val = None
+        self.dl_test = None
+
+        self.transform = transforms.Compose([
+            transforms.ToTensor(),
+            SquarePad(),
+            transforms_v2.Resize((256, 256))
+        ])
+
+    def prepare_data(self):
+        # Download data
+        if not os.path.exists(os.path.join(self.data_dir, type(self).TRAIN_NAME)):
+            deeplake.deepcopy(os.path.join(type(self).URL, type(self).TRAIN_NAME), os.path.join(self.data_dir, type(self).TRAIN_NAME))
+
+        if not os.path.exists(os.path.join(self.data_dir, type(self).VAL_NAME)):
+            deeplake.deepcopy(os.path.join(type(self).URL, type(self).VAL_NAME), os.path.join(self.data_dir, type(self).VAL_NAME))
+
+        if not os.path.exists(os.path.join(self.data_dir, type(self).TEST_NAME)):
+            deeplake.deepcopy(os.path.join(type(self).URL, type(self).TEST_NAME), os.path.join(self.data_dir, type(self).TEST_NAME))
+
+        self.dl_train = deeplake.load(os.path.join(self.data_dir, type(self).TRAIN_NAME))
+        self.dl_val = deeplake.load(os.path.join(self.data_dir, type(self).VAL_NAME))
+        self.dl_test = deeplake.load(os.path.join(self.data_dir, type(self).TEST_NAME))
+        
+        np.random.seed(42) # Set seed for reproducibility
+
+    def setup(self, stage=None):
+        if stage == "fit":
+            category = self.train_category if self.train_category is not None else self.distribution_split
+            self.train_data = self._process_data(self.dl_train, category, self.transform)
+            self.val_data = self._process_data(self.dl_val, category, self.transform)
+
+        elif stage == "test":
+            category = self.test_category if self.test_category is not None else self.distribution_split
+            self.test_data = self._process_data(self.dl_test, category, self.transform)
+
+    
+
+    
+        
 
 
 
@@ -741,6 +832,7 @@ DATASETS = {
     "CIFAR10": CIFAR10DataModule,
     "CIFAR10_OOD": CIFAR10OODDataModule,
     "OFFICEHOME": OfficeHomeDataModule,
+    "PACS": PacsDataModule,
     "ACRE": ACREDataModule,
     "CONCEPTARC": ConceptARCDataModule,
     "RAVEN": RAVENDataModule
