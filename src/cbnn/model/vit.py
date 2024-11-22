@@ -86,7 +86,7 @@ class VIT(pl.LightningModule):
         return parent_parser
     
     def training_step(self, batch, batch_idx):
-        x, y = batch
+        x, y, *_ = batch
         logits = self(x)
         loss = self.loss_function(logits, y)
         acc = self.accuracy(logits, y)
@@ -95,7 +95,7 @@ class VIT(pl.LightningModule):
         return loss
     
     def validation_step(self, batch, batch_idx):
-        x, y = batch
+        x, y, *_ = batch
         logits = self(x)
         loss = self.loss_function(logits, y)
         acc = self.accuracy(logits, y)
@@ -104,7 +104,7 @@ class VIT(pl.LightningModule):
         return loss
     
     def test_step(self, batch, batch_idx):
-        x, y = batch
+        x, y, *_ = batch
         logits = self(x)
         loss = self.loss_function(logits, y)
         acc = self.accuracy(logits, y)

@@ -78,7 +78,7 @@ class BaseVAE(pl.LightningModule):
     
 
     def training_step(self, batch, batch_idx):
-        x, y = batch
+        x, y, *_ = batch
         recon, _, mu, log_var = self(x)
         losses = self.loss_function(x, recon, mu, log_var)
         losses = {"train_" + k: v for k, v in losses.items()}
@@ -86,7 +86,7 @@ class BaseVAE(pl.LightningModule):
         return losses['train_loss']
     
     def validation_step(self, batch, batch_idx):
-        x, y = batch
+        x, y, *_ = batch
         recon, _, mu, log_var = self(x)
         losses = self.loss_function(x, recon, mu, log_var)
         losses = {"val_" + k: v for k, v in losses.items()}
@@ -94,7 +94,7 @@ class BaseVAE(pl.LightningModule):
         return losses['val_loss']
     
     def test_step(self, batch, batch_idx):
-        x, y = batch
+        x, y, *_ = batch
         recon, _, mu, log_var = self(x)
         losses = self.loss_function(x, recon, mu, log_var)
         losses = {"test_" + k: v for k, v in losses.items()}
@@ -202,7 +202,7 @@ class CNNVAEClassifier(CNNVAE):
     
 
     def training_step(self, batch, batch_idx):
-        x, y = batch
+        x, y, *_ = batch
         x_recon, y_recon, _, mu, log_var = self(x)
         losses = self.loss_function(x, x_recon, y, y_recon, mu, log_var)
         losses = {"train_" + k: v for k, v in losses.items()}
@@ -210,7 +210,7 @@ class CNNVAEClassifier(CNNVAE):
         return losses['train_loss']
     
     def validation_step(self, batch, batch_idx):
-        x, y = batch
+        x, y, *_ = batch
         x_recon, y_recon, _, mu, log_var = self(x)
         losses = self.loss_function(x, x_recon, y, y_recon, mu, log_var)
         losses = {"val_" + k: v for k, v in losses.items()}
@@ -218,7 +218,7 @@ class CNNVAEClassifier(CNNVAE):
         return losses['val_loss']
     
     def test_step(self, batch, batch_idx):
-        x, y = batch
+        x, y, *_ = batch
         x_recon, y_recon, _, mu, log_var = self(x)
         losses = self.loss_function(x, x_recon, y, y_recon, mu, log_var)
         losses = {"test_" + k: v for k, v in losses.items()}

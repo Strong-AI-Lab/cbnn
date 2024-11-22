@@ -255,11 +255,16 @@ class OfficeHomeDataModule(BaseDataModule):
 
         images = data.images.data(aslist=True)['value']
         labels = data.domain_objects.data(aslist=True)['value']
+        domains = data.domain_categories.data(aslist=True)['value']
         
         images = [transform(image) for image in images]
         labels = [int(label[0]) for label in labels]
+        domains = [int(domain[0]) for domain in domains]
 
-        return list(zip(images, labels))
+        if len(set(domains)) == 1:
+            return list(zip(images, labels))
+        else:
+            return list(zip(images, labels, domains))
     
     def _get_split_idxs(self, data : deeplake.Dataset, split : str):
         ranges = type(self).CATEGORIES[split]
@@ -374,11 +379,16 @@ class PacsDataModule(BaseDataModule):
 
         images = data.images.data(aslist=True)['value']
         labels = data.labels.data(aslist=True)['value']
+        domains = data.domains.data(aslist=True)['value']
 
         images = [transform(image) for image in images]
         labels = [int(label[0]) for label in labels]
+        domains = [int(domain[0]) for domain in domains]
 
-        return list(zip(images, labels))
+        if len(set(domains)) == 1:
+            return list(zip(images, labels))
+        else:
+            return list(zip(images, labels, domains))
 
     def __init__(self, **kwargs):
         super(PacsDataModule, self).__init__(**kwargs)

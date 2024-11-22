@@ -1,6 +1,6 @@
 
 import os
-from typing import Optional, List
+from typing import Optional, List, Tuple
 
 from .modules.encoders import CNNVariationalEncoder
 from .modules.decoders import CNNVariationalDecoder
@@ -300,7 +300,7 @@ class CBNN(pl.LightningModule):
         return x_recon
     
     def sample_images(self, num_samples: int = 64):
-        inp, _ = next(iter(self.trainer.datamodule.val_dataloader()))
+        inp, *_ = next(iter(self.trainer.datamodule.val_dataloader()))
         if self.nb_input_images > 1:
             inp = inp.view(-1, *inp.size()[2:])
         sample_images(self, inp, self.logger.log_dir, self.logger.name, self.current_epoch, num_samples)
@@ -433,30 +433,70 @@ class CBNN(pl.LightningModule):
             y_mix += torch.nn.functional.one_hot(l_i, num_classes=num_classes) * self.context_inference_weight / len(labels_to_mix)
         return y_mix
 
-    def _sample_context_from_distribution(self, split : str = "train", label : Optional[torch.Tensor] = None):
-        dataloader = self.context_distrib_loader_funcs[split]()
+    def _match_context_to_value(self, dataloader : torch.utils.data.DataLoader, label : Optional[torch.Tensor] = None, domain : Optional[torch.Tensor] = None) -> Tuple[torch.Tensor, torch.Tensor]:
+        if label is not None and domain is not None:
+            candidates = {tuple(i):[] for i in torch.cat([label.unsqueeze(1), domain.unsqueeze(1)], dim=1).unique(dim=0).tolist()}
+        elif label is not None:
+            candidates = {i:[] for i in label.unique().tolist()}
+        elif domain is not None:
+            candidates = {i:[] for i in domain.unique().tolist()}
+        else:
+            raise ValueError("No label or domain provided for context matching.")
+        
         context_list = []
         context_label_list = []
-
-        if label is None:
-            for _ in range(self.z_samples):
-                x_context, y_context = next(iter(dataloader))
-                context_list.append(x_context.to(self.device))
-                context_label_list.append(y_context.to(self.device))
         
-        else: # match context to label
-            candidates = {i:[] for i in label.unique().tolist()}
-            for _ in range(self.z_samples):
-                while not all([len(candidates[i]) >= (label==i).sum().item() for i in candidates]):
-                    x_context, y_context = next(iter(dataloader))
+        for _ in range(self.z_samples):
+            cond = False
+            while not cond:
+                x_context, y_context, *domains = next(iter(dataloader))
+                if label is not None and domain is not None:
+                    for i in range(len(y_context)):
+                        if (y_context[i].item(), domains[i].item()) in candidates:
+                            candidates[(y_context[i].item(), domains[i].item())].append((x_context[i], y_context[i]))
+
+                    vals = torch.cat([y_context.unsqueeze(1), domains.unsqueeze(1)], dim=1).unique(dim=0)
+                    cond = all([len(candidates[i]) >= torch.eq(vals,torch.tensor(list(i))).all(dim=1).sum().item() for i in candidates])
+                    indices = torch.cat([label.unsqueeze(1), domain.unsqueeze(1)], dim=1).tolist()
+                elif label is not None:
                     for i in range(len(y_context)):
                         if y_context[i].item() in candidates:
-                            candidates[y_context[i].item()].append(x_context[i])
-                selected_context = []
-                for i in label.tolist():
-                    selected_context.append(candidates[i].pop(0))
-                context_list.append(torch.stack(selected_context).to(self.device))
-                context_label_list.append(label.to(self.device))
+                            candidates[y_context[i].item()].append((x_context[i], y_context[i]))
+                    cond = all([len(candidates[i]) >= (label==i).sum().item() for i in candidates])
+                    indices = label.tolist()
+                elif domain is not None:
+                    for i in range(len(y_context)):
+                        if domains[0][i].item() in candidates:
+                            candidates[domains[0][i].item()].append((x_context[i], y_context[i]))
+                    cond = all([len(candidates[i]) >= (domain==i).sum().item() for i in candidates])
+                    indices = domain.tolist()
+
+            selected_x_context = []
+            selected_y_context = []
+            for i in indices:
+                x, y = candidates[i].pop(0)
+                selected_x_context.append(x)
+                selected_y_context.append(y)
+                
+            context_list.append(torch.stack(selected_x_context).to(self.device))
+            context_label_list.append(torch.tensor(selected_y_context).to(self.device))
+
+        return context_list, context_label_list
+
+    def _sample_context_from_distribution(self, split : str = "train", label : Optional[torch.Tensor] = None, domain : Optional[torch.Tensor] = None):
+        dataloader = self.context_distrib_loader_funcs[split]()
+
+        if label is None and domain is None:
+            context_list = []
+            context_label_list = []
+
+            for _ in range(self.z_samples):
+                x_context, y_context, *_ = next(iter(dataloader))
+                context_list.append(x_context)
+                context_label_list.append(y_context)
+        
+        else: # match context to label or domain
+            context_list, context_label_list = self._match_context_to_value(dataloader, label, domain)
         
         self.pre_load_context(context_list, context_label_list)
 
@@ -476,13 +516,14 @@ class CBNN(pl.LightningModule):
 
 
     def training_step(self, batch, batch_idx):
+        x, y, *domains = batch
+
+        domain = None if len(domains) == 0 else domains[0]
         if self.sample_context_from_distribution:
-            self._sample_context_from_distribution(split="train")
+            self._sample_context_from_distribution(split="train", domain=domain)
 
         x_context = self.x_context
         y_context = self.y_context
-
-        x, y = batch
         x_recons, y_recon, *outputs = self(x, x_context)
         if self.context_inference_weight > 0.0:
             y = self._mix_labels(y, y_context, y_recon.size(-1))
@@ -493,12 +534,13 @@ class CBNN(pl.LightningModule):
         return losses['train_loss']
     
     def validation_step(self, batch, batch_idx):
+        x, y, *domains = batch
+
+        domain = None if len(domains) == 0 else domains[0]
         if self.sample_context_from_distribution:
-            self._sample_context_from_distribution(split="val")
+            self._sample_context_from_distribution(split="val", domain=domain)
 
         x_context = self.x_context
-
-        x, y = batch
         x_recons, y_recon, *outputs = self(x, x_context)
         
         losses = self.loss_function(x, x_recons, y, y_recon, *outputs)
@@ -510,12 +552,13 @@ class CBNN(pl.LightningModule):
         self.sample_images()
     
     def test_step(self, batch, batch_idx):
+        x, y, *domains = batch
+
+        domain = None if len(domains) == 0 else domains[0]
         if self.sample_context_from_distribution:
-            self._sample_context_from_distribution(split="test")
+            self._sample_context_from_distribution(split="test", domain=domain)
 
         x_context = self.x_context
-
-        x, y = batch
         x_recons, y_recon, *outputs = self(x, x_context)
         
         losses = self.loss_function(x, x_recons, y, y_recon, *outputs)
