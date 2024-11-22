@@ -1,4 +1,5 @@
 
+import os
 from typing import Optional, List
 
 from .modules.encoders import CNNVariationalEncoder
@@ -659,6 +660,17 @@ class ResNet_CT(CBNN):
             kwargs.pop('inference_context_collator')
         super(ResNet_CT, self).__init__(inference_without_encoder=True, inference_context_collator='none', **kwargs)
 
+    def _load_vae_save(self, vae_save: str):
+        if os.path.exists(vae_save):
+            checkpoint = torch.load(vae_save)
+            vae_state_dict = checkpoint['state_dict']
+            vae_state_dict = {f'context_{k}': v for k, v in vae_state_dict.items() if k.endswith('bias') or k.endswith('weight')}
+
+            self.load_state_dict(vae_state_dict, strict=False)
+
+            print(f"Loaded VAE from {vae_save}")
+        else:
+            print(f"Could not find VAE at {vae_save}")
 
     def _init_modules(self,
             in_channels: int = 3,
@@ -666,6 +678,7 @@ class ResNet_CT(CBNN):
             num_classes: int = 10,
             latent_dim: int = 256,
             encoder_hidden_dims: List = None,
+            vae_save: str = None,
             **kwargs):
         
         self.latent_dim = latent_dim
@@ -675,6 +688,9 @@ class ResNet_CT(CBNN):
         self.context_decoder = CNNVariationalDecoder(self.recons_latent_dim, in_channels, image_dim, encoder_hidden_dims[::-1] if encoder_hidden_dims is not None else None)
         self.inference_encoder = None
         self.inference_classifier = resnet18_invariant(in_channels=in_channels, num_classes=num_classes, invariant_dim=latent_dim, image_size=image_dim)
+        
+        if vae_save is not None:
+            self._load_vae_save(vae_save)
     
     @classmethod
     def add_model_specific_args(cls, parent_parser):
@@ -686,6 +702,7 @@ class ResNet_CT(CBNN):
         parser.add_argument('--num_classes', type=int, default=10, help='Number of classes in the dataset.')
         parser.add_argument('--latent_dim', type=int, default=256, help='Dimension of the latent space.')
         parser.add_argument('--encoder_hidden_dims', type=int, nargs='+', default=[32, 64, 128, 256, 512], help='Hidden dimensions for the encoder.')
+        parser.add_argument('--vae_save', type=str, default=None, help='Path to load the VAE model from, if any.')
         
         return parent_parser
 
@@ -699,7 +716,6 @@ class MCQA_ResNet_CBNN(CBNN):
         if 'inference_context_collator' in kwargs:
             kwargs.pop('inference_context_collator')
         super(ResNet_CBNN, self).__init__(inference_without_encoder=True, inference_context_collator='none', **kwargs)
-
 
     def _init_modules(self,
             in_channels: int = 3,
