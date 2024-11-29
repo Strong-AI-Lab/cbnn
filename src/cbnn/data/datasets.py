@@ -304,15 +304,17 @@ class OfficeHomeDataModule(BaseDataModule):
         self.train_data = None
         self.val_data = None
         self.test_data = None
+        self.dl_data = None
 
     def prepare_data(self):
         if not os.path.exists(os.path.join(self.data_dir, type(self).NAME)):
             # Download data
             deeplake.deepcopy(os.path.join(type(self).URL, type(self).NAME), os.path.join(self.data_dir, type(self).NAME))
-        
-        self.dl_data = deeplake.load(os.path.join(self.data_dir, type(self).NAME))
 
     def setup(self, stage=None):
+        if self.dl_data is None:
+            self.dl_data = deeplake.load(os.path.join(self.data_dir, type(self).NAME))
+
         if self.train_idxs is None:
             np.random.seed(42) # Set seed for reproducibility
 
@@ -418,19 +420,21 @@ class PacsDataModule(BaseDataModule):
         if not os.path.exists(os.path.join(self.data_dir, type(self).TEST_NAME)):
             deeplake.deepcopy(os.path.join(type(self).URL, type(self).TEST_NAME), os.path.join(self.data_dir, type(self).TEST_NAME))
 
-        self.dl_train = deeplake.load(os.path.join(self.data_dir, type(self).TRAIN_NAME))
-        self.dl_val = deeplake.load(os.path.join(self.data_dir, type(self).VAL_NAME))
-        self.dl_test = deeplake.load(os.path.join(self.data_dir, type(self).TEST_NAME))
-        
-        np.random.seed(42) # Set seed for reproducibility
-
     def setup(self, stage=None):
         if stage == "fit":
+            if self.dl_train is None:
+                self.dl_train = deeplake.load(os.path.join(self.data_dir, type(self).TRAIN_NAME))
+            if self.dl_val is None:
+                self.dl_val = deeplake.load(os.path.join(self.data_dir, type(self).VAL_NAME))
+
             category = self.train_category if self.train_category is not None else self.distribution_split
             self.train_data = self._process_data(self.dl_train, category, self.transform)
             self.val_data = self._process_data(self.dl_val, category, self.transform)
 
         elif stage == "test":
+            if self.dl_test is None:
+                self.dl_test = deeplake.load(os.path.join(self.data_dir, type(self).TEST_NAME))
+
             category = self.test_category if self.test_category is not None else self.distribution_split
             self.test_data = self._process_data(self.dl_test, category, self.transform)
 

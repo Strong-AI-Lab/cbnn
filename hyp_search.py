@@ -23,16 +23,17 @@ def build_config(args):
     config = {
         'z_samples': tune.choice([1, 4]),
         'w_samples': tune.choice([1, 4]),
-        'recon_weight': tune.loguniform(1e-2, 10),
-        'kld_weight': tune.loguniform(1e-7, 1e-3),
-        'context_kld_weight': tune.loguniform(1e-7, 1e-3),
-        'w_kld_weight': tune.loguniform(1e-7, 1e-3),
+        'kld_weight': tune.loguniform(1e-7, 1e-5),
+        'context_kld_weight': tune.loguniform(1e-7, 1e-5),
+        'latent_dim': tune.choice([64, 128, 256, 512]),
+        'w_kld_weight': tune.loguniform(1e-7, 1e-5),
         'context_inference_weight': tune.choice([0.0, 0.25, 0.4]),
-        'context_split_mi_weight': tune.choice([0.0, 0.5, 1.0]),
-        'split_recons_infer_latents': tune.choice([None, 0.5]),
+        'weight_pseudo_riemann_regularisation': tune.choice([0.0, 0.01, 0.1]),
+        # 'context_split_mi_weight': tune.choice([0.0, 0.5, 1.0]),
+        # 'split_recons_infer_latents': tune.choice([None, 0.5]),
         'learning_rate': tune.loguniform(1e-5, 1e-3),
         'weight_decay': tune.loguniform(1e-5, 1e-3),
-        'recon_weight': tune.loguniform(1e-2, 10),
+        # 'recon_weight': tune.loguniform(1e-2, 10),
     }
     for key in config:
         if key in args:

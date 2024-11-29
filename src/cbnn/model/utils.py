@@ -90,8 +90,8 @@ def average_collage_optim(input_collator : Callable): # to use carefully, can le
     def collate_fn(zs : List[torch.Tensor], z_cs : List[torch.Tensor], classifier : Callable):
         context_size = len(zs)
         batch_size = zs[0].shape[0]
-        z = torch.cat(zs, dim=0)
-        z_c = torch.cat(z_cs, dim=0)
+        z = torch.cat(zs, dim=0) # [C,B,D] -> [C*B,D]
+        z_c = torch.cat(z_cs, dim=0) # [C,B,D] -> [C*B,D]
         inputs = input_collator(z, z_c, classifier)
         outputs, *w = classifier(*inputs)
         outputs = outputs.view(context_size, batch_size, -1).mean(dim=0)
@@ -130,6 +130,11 @@ def cat_collator_optim(z : torch.Tensor, z_c : torch.Tensor, classifier : Callab
 def sum_collator_optim(z : torch.Tensor, z_c : torch.Tensor, classifier : Callable):
     return [z + z_c]
 
+@average_collage_optim
+def mask_collator_optim(z : torch.Tensor, z_c : torch.Tensor, classifier : Callable):
+    d = z.size(-1)
+    return [torch.cat([z[:,:d//2], z_c[:,d//2:]], dim=-1)]
+
 @average_collage
 def mul_collator(z : torch.Tensor, z_c : torch.Tensor, classifier : Callable):
     return [z * z_c]
@@ -141,6 +146,11 @@ def sub_collator(z : torch.Tensor, z_c : torch.Tensor, classifier : Callable):
 @average_collage
 def none_collator(z : torch.Tensor, z_c : torch.Tensor, classifier : Callable):
     return [z, z_c]
+
+@average_collage
+def mask_collator(z : torch.Tensor, z_c : torch.Tensor, classifier : Callable):
+    d = z.size(-1)
+    return [torch.cat([z[:,:d//2], z_c[:,d//2:]], dim=-1)]
 
 
 def cross_product(zs : List[torch.Tensor]) -> torch.Tensor:
@@ -198,4 +208,6 @@ INFERENCE_CONTEXT_COLLATORS = {
     "cross_cat" : cross_cat_collator,
     "cross_sum" : cross_sum_collator,
     "cross_mul" : cross_mul_collator,
+    "mask" : mask_collator,
+    "mask_optim" : mask_collator_optim
 }

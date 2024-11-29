@@ -492,8 +492,8 @@ class CBNN(pl.LightningModule):
 
             for _ in range(self.z_samples):
                 x_context, y_context, *_ = next(iter(dataloader))
-                context_list.append(x_context)
-                context_label_list.append(y_context)
+                context_list.append(x_context.to(self.device))
+                context_label_list.append(y_context.to(self.device))
         
         else: # match context to label or domain
             context_list, context_label_list = self._match_context_to_value(dataloader, label, domain)
@@ -516,11 +516,10 @@ class CBNN(pl.LightningModule):
 
 
     def training_step(self, batch, batch_idx):
-        x, y, *domains = batch
+        x, y, *_ = batch
 
-        domain = None if len(domains) == 0 else domains[0]
         if self.sample_context_from_distribution:
-            self._sample_context_from_distribution(split="train", domain=domain)
+            self._sample_context_from_distribution(split="train")
 
         x_context = self.x_context
         y_context = self.y_context

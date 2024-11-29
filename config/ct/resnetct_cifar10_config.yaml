@@ -32,6 +32,7 @@ gradient_clip_val: null
 ic_mi_weight: 0.0
 image_dim: 32
 in_channels: 3
+inference_context_collator: sum_optim
 inference_mode: true
 inference_without_encoder: true
 inverse_context: true
@@ -65,6 +66,7 @@ num_workers: 4
 overfit_batches: 0.0
 plugins: null
 precision: 32
+pretrained: true
 profiler: null
 recon_weight: 1.0
 reload_dataloaders_every_n_epochs: 0

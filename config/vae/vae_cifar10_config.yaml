@@ -30,8 +30,8 @@ image_dim: 32
 in_channels: 3
 inference_mode: true
 ipus: null
-kld_weight: 0.00025
-latent_dim: 64
+kld_weight: 1.0e-06
+latent_dim: 512
 learning_rate: 0.005
 limit_predict_batches: null
 limit_test_batches: null
@@ -40,7 +40,7 @@ limit_val_batches: null
 load_config: null
 log_every_n_steps: 50
 logger: true
-max_epochs: 10
+max_epochs: 20
 max_steps: -1
 max_time: null
 min_epochs: null
